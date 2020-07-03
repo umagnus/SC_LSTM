@@ -1,0 +1,24 @@
+01矩阵
+epoch=20
+Test cost mse: 0.003088688106161722
+Test accuracy: 0.9919915962637514
+
+
+Test cost mse: 0.0012549269574759693
+Test accuracy: 0.9988572848470587
+
+fc only:
+flags.DEFINE_float('learning_rate', 0.0001, 'Initial learning rate.')
+flags.DEFINE_integer('epochs', 50, 'Number of epochs to train.')
+flags.DEFINE_integer('hidden1', 32, 'Number of units in hidden layer 1.')
+flags.DEFINE_integer('hidden2', 16, 'Number of units in hidden layer 2.')
+flags.DEFINE_integer('hidden3', 256, 'Number of units in hidden layer 3.')
+flags.DEFINE_float('weight_decay', 0., 'Weight for L2 loss on embedding matrix.')
+flags.DEFINE_float('dropout', 0., 'Dropout rate (1 - keep probability).')
+flags.DEFINE_integer('windows_size', 1, 'Length of windows')
+flags.DEFINE_integer('batch_size', 16, 'Batch size')
+mse:2.302743562946138e-05
+
+fc+sc:
+Test cost mse: 1.528711952162225e-05
+Test accuracy: 1.0000004232452628
