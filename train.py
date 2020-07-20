@@ -172,11 +172,11 @@ for epoch in range(FLAGS.epochs):
 
             # Run single weight update
             #_, D_loss_curr = sess.run([D_opt, D_loss], feed_dict=feed_dict)
-            outs = sess.run([opt.opt_op, opt.cost, opt.mse, opt.pred, opt.label], feed_dict=feed_dict)
+            outs = sess.run([model.opt_op, model.loss, model.outputs, model.labels], feed_dict=feed_dict)
 
             # Compute average loss
             avg_cost_iter = avg_cost_iter + outs[1]
-            avg_accuracy_iter = avg_accuracy_iter + outs[2]
+            avg_accuracy_iter = avg_accuracy_iter + outs[1]
             # print(outs[4])
             # print(outs[3])
             # print(outs[2])
@@ -194,7 +194,6 @@ print("Optimization Finished!")
 
 test_cost = 0
 test_accuracy = 0
-file = open('test_result.txt', 'w')
 for sub in test_index:
     adj_sc_sub = sc_adj[sub]
     adj_sc_sub = preprocess_graph(adj_sc_sub)
@@ -224,13 +223,13 @@ for sub in test_index:
         # Construct feed dictionary
         feed_dict = construct_feed_dict(adj_sc, adj_fc, adj_label[:, 0], features_sc, features_fc, placeholders)
         # Run single weight update
-        outs = sess.run([opt.mse, opt.accuracy, model.pred], feed_dict=feed_dict)
+        outs = sess.run([model.mse, model.pred, model.labels], feed_dict=feed_dict)
 
         # Compute average loss
         test_cost_iter = test_cost_iter + outs[0]
         test_accuracy_iter = test_accuracy_iter + outs[1]
         print(adj_label[:, 0].reshape((FLAGS.batch_size, 8100)))
-        print(outs[2])
+        print(outs[1])
         print("++++++++++++++++++++++++")
 
     test_cost = test_cost+test_cost_iter/iterations
@@ -238,7 +237,6 @@ for sub in test_index:
 
 print("Test cost mse: " + str(test_cost/len(test_index)))
 print("Test accuracy: " + str(test_accuracy/len(test_index)))
-file.close()
 # roc_score, ap_score = get_roc_score(test_edges, test_edges_false)
 # print('Test ROC score: ' + str(roc_score))
 # print('Test AP score: ' + str(ap_score))

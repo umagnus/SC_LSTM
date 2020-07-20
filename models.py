@@ -33,6 +33,7 @@ class Model(object):
         self.outputs = None
 
         self.loss = 0
+        self.mse = 0
         self.optimizer = None
         self.opt_op = None
 
@@ -43,12 +44,12 @@ class Model(object):
         """ Wrapper for _build() """
         with tf.variable_scope(self.name):
             self._build()
-        # Build sequential layer model
-        self.activations.append(self.inputs)
-        for layer in self.layers:
-            hidden = layer(self.activations[-1])
-            self.activations.append(hidden)
-        self.outputs = self.activations[-1]
+        # # Build sequential layer model
+        # self.activations.append(self.inputs)
+        # for layer in self.layers:
+        #     hidden = layer(self.activations[-1])
+        #     self.activations.append(hidden)
+        # self.outputs = self.activations[-1]
 
         # Store model variables for easy access
         variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.name)
@@ -56,6 +57,7 @@ class Model(object):
 
         # Build metrics
         self._loss()
+        self._mse()
 
         self.opt_op = self.optimizer.minimize(self.loss)
 
@@ -66,6 +68,9 @@ class Model(object):
         pass
 
     def _loss(self):
+        raise NotImplementedError
+
+    def _mse(self):
         raise NotImplementedError
 
 
@@ -82,6 +87,9 @@ class Generator(Model):
         self.adj_fc = placeholders['adj_fc']
         self.dropout = placeholders['dropout']
         self.labels = placeholders['labels']
+
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)
+
         self.build()
 
     def _build(self):
@@ -118,6 +126,22 @@ class Generator(Model):
         self.reconstructions = tf.tile(self.reconstructions, [FLAGS.batch_size])
         self.reconstructions = tf.reshape(self.reconstructions, [FLAGS.batch_size, -1])
         self.pred = self.prefc + self.reconstructions
+        self.outputs = self.pred
+
+    def _loss(self):
+        preds_sub = tf.reshape(self.outputs, [FLAGS.batch_size, 90*90])
+        labels_sub = tf.reshape(self.labels, [FLAGS.batch_size, 90*90])
+
+        # Cross entropy error
+        self.loss += tf.reduce_mean(tf.losses.huber_loss(preds_sub, labels_sub))
+
+    def _mse(self):
+        preds_sub = tf.reshape(self.outputs, [FLAGS.batch_size, 90*90])
+        labels_sub = tf.reshape(self.labels, [FLAGS.batch_size, 90*90])
+        self.mse = tf.losses.mean_squared_error(preds_sub, labels_sub)
+
+    def predict(self):
+        return self.outputs
 
 
 def Discriminator(inputs, reuse=False):
@@ -129,3 +153,5 @@ def Discriminator(inputs, reuse=False):
         output = Dense(units=1,
                        activation=tf.nn.sigmoid)(hidden2)
     return output
+
+
