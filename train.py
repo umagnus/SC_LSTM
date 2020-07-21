@@ -10,20 +10,22 @@ os.environ['CUDA_VISIBLE_DEVICES'] = ""
 import tensorflow as tf
 import numpy as np
 import scipy.sparse as sp
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 from sklearn.metrics import roc_auc_score
 from sklearn.metrics import average_precision_score
 
 from optimizer import OptimizerED
 from input_data import loadFSData
-from models import Generator, Discriminator
+from models import Generator, Discriminator, lstmGAN
 from preprocessing import preprocess_graph, construct_feed_dict, construct_feed_dict_discriminator, sparse_to_tuple, mask_test_edges
 
 # Settings
 flags = tf.app.flags
 FLAGS = flags.FLAGS
 flags.DEFINE_float('learning_rate', 0.0001, 'Initial learning rate.')
-flags.DEFINE_integer('epochs', 50, 'Number of epochs to train.')
+flags.DEFINE_integer('epochs', 20, 'Number of epochs to train.')
 flags.DEFINE_integer('hidden1', 32, 'Number of units in hidden layer 1.(sc)')
 flags.DEFINE_integer('hidden2', 16, 'Number of units in hidden layer 2.(fc)')
 flags.DEFINE_integer('hidden3', 256, 'Number of units in hidden layer 3.(lstm)')
@@ -109,7 +111,10 @@ window_number = time_length - window_length
 num_features = 90
 features_nonzero = 890
 # Create model
-model = Generator(placeholders, window_length, features_nonzero, node_number)
+#model = Generator(placeholders, window_length, features_nonzero, node_number)
+generator = Generator()
+discriminator = Discriminator()
+lstmGAN = lstmGAN(placeholders, window_length, features_nonzero, node_number, generator, discriminator)
 #real_graph = tf.placeholder(tf.float32, shape=[FLAGS.batch_size, node_number*node_number], name='real_graph')
 #D_fake = Discriminator(model.pred)
 #D_real = Discriminator(real_graph)
@@ -119,11 +124,11 @@ norm = sc_adj[0].shape[0] * sc_adj[0].shape[0] / float((sc_adj[0].shape[0] * sc_
 
 
 # Optimizer
-with tf.name_scope('optimizer'):
-    opt = OptimizerED(preds=model.pred,
-                      labels=placeholders['labels'],
-                      pos_weight=pos_weight,
-                      norm=10000)
+# with tf.name_scope('optimizer'):
+#     opt = OptimizerED(preds=model.pred,
+#                       labels=placeholders['labels'],
+#                       pos_weight=pos_weight,
+#                       norm=10000)
 
 # Initialize session
 sess = tf.Session()
@@ -132,8 +137,8 @@ sess.run(tf.global_variables_initializer())
 
 # Train model
 for epoch in range(FLAGS.epochs):
-    avg_cost = 0
-    avg_accuracy = 0
+    avg_d_loss = 0
+    avg_g_loss = 0
     t = time.time()
 
     for sub in train_index:
@@ -152,8 +157,8 @@ for epoch in range(FLAGS.epochs):
         features_fc_data = features_fc_sub[:round_data_len].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
         ydata = adj_label_sub[1:round_data_len + 1].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
 
-        avg_cost_iter = 0
-        avg_accuracy_iter = 0
+        avg_d_loss_iter = 0
+        avg_g_loss_iter = 0
         for i in range(iterations):
             adj_sc = adj_sc_sub
             adj_fc = adj_fc_data[:, i*FLAGS.windows_size:(i+1)*FLAGS.windows_size]
@@ -172,21 +177,24 @@ for epoch in range(FLAGS.epochs):
 
             # Run single weight update
             #_, D_loss_curr = sess.run([D_opt, D_loss], feed_dict=feed_dict)
-            outs = sess.run([model.opt_op, model.loss, model.outputs, model.labels], feed_dict=feed_dict)
+            #outs = sess.run([model.opt_op, model.loss, model.outputs, model.labels], feed_dict=feed_dict)
+            outs_d = sess.run([lstmGAN.D_solver, lstmGAN.D_loss], feed_dict=feed_dict)
+            outs_g = sess.run([lstmGAN.G_solver, lstmGAN.G_loss], feed_dict=feed_dict)
+
 
             # Compute average loss
-            avg_cost_iter = avg_cost_iter + outs[1]
-            avg_accuracy_iter = avg_accuracy_iter + outs[1]
+            avg_d_loss_iter = avg_d_loss_iter + outs_d[1]
+            avg_g_loss_iter = avg_g_loss_iter + outs_g[1]
             # print(outs[4])
             # print(outs[3])
             # print(outs[2])
             # print("+++++++++++++++++++++++")
-        avg_cost = avg_cost + avg_cost_iter/iterations
-        avg_accuracy = avg_accuracy + avg_accuracy_iter/iterations
-    avg_cost = avg_cost/len(train_index)
-    avg_accuracy = avg_accuracy/len(train_index)
-    print("Epoch:", '%04d' % (epoch + 1), "train_loss=", "{:.5f}".format(avg_cost),
-          "train_mse=", "{:.5f}".format(avg_accuracy),
+        avg_d_loss = avg_d_loss + avg_d_loss_iter/iterations
+        avg_g_loss = avg_g_loss + avg_g_loss_iter/iterations
+    avg_d_loss = avg_d_loss/len(train_index)
+    avg_g_loss = avg_g_loss/len(train_index)
+    print("Epoch:", '%04d' % (epoch + 1), "train_d_loss=", "{:.5f}".format(avg_d_loss),
+          "train_g_loss=", "{:.5f}".format(avg_g_loss),
        #"D_loss=", "{:.5f}".format(D_loss_curr),
           "time=", "{:.5f}".format(time.time() - t))
 
@@ -223,7 +231,7 @@ for sub in test_index:
         # Construct feed dictionary
         feed_dict = construct_feed_dict(adj_sc, adj_fc, adj_label[:, 0], features_sc, features_fc, placeholders)
         # Run single weight update
-        outs = sess.run([model.mse, model.pred, model.labels], feed_dict=feed_dict)
+        outs = sess.run([lstmGAN.G_loss, lstmGAN.G_sample, lstmGAN.labels], feed_dict=feed_dict)
 
         # Compute average loss
         test_cost_iter = test_cost_iter + outs[0]
@@ -231,6 +239,8 @@ for sub in test_index:
         print(adj_label[:, 0].reshape((FLAGS.batch_size, 8100)))
         print(outs[1])
         print("++++++++++++++++++++++++")
+        # heatmap = sns.heatmap(abs(adj_label[:, 0].reshape((FLAGS.batch_size, 8100))-outs[1]), cmap='YlGnBu')
+        # plt.show()
 
     test_cost = test_cost+test_cost_iter/iterations
     test_accuracy = test_accuracy + test_accuracy_iter/iterations

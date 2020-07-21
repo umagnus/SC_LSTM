@@ -22,3 +22,6 @@ mse:2.302743562946138e-05
 fc+sc:
 Test cost mse: 1.528711952162225e-05
 Test accuracy: 1.0000004232452628
+
+GAN epoch=20:
+Test cost mse: 1.2529680418704401e-05
