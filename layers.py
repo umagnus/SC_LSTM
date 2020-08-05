@@ -142,3 +142,62 @@ class GraphConvolutionSparseWindows(Layer):
         x = tf.matmul(self.adj, x)
         outputs = self.act(x)
         return outputs
+
+
+class GraphConvolutionSparseBatch(Layer):
+    """Graph convolution layer for sparse inputs."""
+    def __init__(self, input_dim, output_dim, adj, features_nonzero,  batch_size, dropout=0., act=tf.nn.relu, **kwargs):
+        super(GraphConvolutionSparseBatch, self).__init__(**kwargs)
+        with tf.variable_scope(self.name + '_vars'):
+            self.vars['weights'] = weight_variable_glorot_batch(batch_size, input_dim, output_dim, name="weights")
+        self.dropout = dropout
+        self.adj = adj
+        self.act = act
+        self.issparse = True
+        self.features_nonzero = features_nonzero
+
+    def _call(self, inputs):
+        x = inputs
+        #x = dropout_sparse(x, 1-self.dropout, self.features_nonzero)
+        print(x)
+        x = tf.matmul(x, self.vars['weights'])
+        x = tf.matmul(self.adj, x)
+        outputs = self.act(x)
+        return outputs
+
+
+class InnerProductLSTM(Layer):
+    def __init__(self, units, dropout=0., act=tf.nn.tanh,  **kwargs):
+        super(InnerProductLSTM, self).__init__(**kwargs)
+        self.dropout = dropout
+        self.act = act
+        self.units = units
+
+    def _call(self, inputs):
+        cell = tf.nn.rnn_cell.LSTMCell(num_units=self.units, activation=self.act)
+        self.current_V, (c, h) = tf.nn.dynamic_rnn(cell=cell,
+                                                   inputs=inputs,
+                                                   dtype=tf.float32,
+                                                   time_major=False)
+        outputs = tf.reshape(h, [-1, self.units])
+        return outputs
+
+
+class InnerProduceDense(Layer):
+    def __init__(self, input_dim, units, batch_size, dropout=0., act=tf.nn.sigmoid, **kwargs):
+        super(InnerProduceDense, self).__init__(**kwargs)
+        with tf.variable_scope(self.name + '_vars'):
+            self.vars['weights'] = weight_variable_glorot(input_dim, units, name="weights")
+            self.vars['bias'] = tf.Variable(tf.zeros(shape=[units]), name="bias")
+        self.units = units
+        self.dropout = dropout
+        self.input_dim = input_dim
+        self.batch_size = batch_size
+        self.act = act
+
+    def _call(self, inputs):
+        dense = tf.matmul(inputs, self.vars['weights'])+self.vars['bias']
+        dropout = tf.nn.dropout(dense, 1-self.dropout)
+        output = self.act(dropout)
+        return output
+

@@ -25,3 +25,7 @@ Test accuracy: 1.0000004232452628
 
 GAN epoch=20:
 Test cost mse: 1.2529680418704401e-05
+
+generator loss:
+Test cost mse: 4.17142916830926e-06
+

@@ -24,15 +24,19 @@ from preprocessing import preprocess_graph, construct_feed_dict, construct_feed_
 # Settings
 flags = tf.app.flags
 FLAGS = flags.FLAGS
-flags.DEFINE_float('learning_rate', 0.0001, 'Initial learning rate.')
-flags.DEFINE_integer('epochs', 20, 'Number of epochs to train.')
+flags.DEFINE_float('pre_learning_rate', 0.0001, 'Initial pre learning rate')
+flags.DEFINE_float('learning_rate', 0.0002, 'Initial learning rate.')
+flags.DEFINE_integer('pre_epochs', 20, 'Number of epochs to pre-train')
+flags.DEFINE_integer('epochs', 50, 'Number of epochs to train.')
 flags.DEFINE_integer('hidden1', 32, 'Number of units in hidden layer 1.(sc)')
 flags.DEFINE_integer('hidden2', 16, 'Number of units in hidden layer 2.(fc)')
-flags.DEFINE_integer('hidden3', 256, 'Number of units in hidden layer 3.(lstm)')
-flags.DEFINE_integer('hidden4', 128, 'Number of units in hidden layer 4.(dis)')
+flags.DEFINE_integer('hidden3', 32, 'Number of units in hidden layer 3.(lstm)')
+flags.DEFINE_integer('hidden4', 8, 'Number of units in hidden layer 4.(dis)')
+flags.DEFINE_integer('hidden5', 128, 'Number of units in hidden layer 5.(dis_fc)')
+flags.DEFINE_integer('hidden6', 16, 'Number of units in hidden layer 6.(dis_fc)')
 flags.DEFINE_float('weight_decay', 0., 'Weight for L2 loss on embedding matrix.')
 flags.DEFINE_float('dropout', 0., 'Dropout rate (1 - keep probability).')
-flags.DEFINE_integer('windows_size', 1, 'Length of windows')
+flags.DEFINE_integer('windows_size', 8, 'Length of windows')
 flags.DEFINE_integer('batch_size', 16, 'Batch size')
 
 flags.DEFINE_string('model', 'gcn_vae', 'Model string.')
@@ -111,29 +115,65 @@ window_number = time_length - window_length
 num_features = 90
 features_nonzero = 890
 # Create model
-#model = Generator(placeholders, window_length, features_nonzero, node_number)
 generator = Generator()
 discriminator = Discriminator()
 lstmGAN = lstmGAN(placeholders, window_length, features_nonzero, node_number, generator, discriminator)
-#real_graph = tf.placeholder(tf.float32, shape=[FLAGS.batch_size, node_number*node_number], name='real_graph')
-#D_fake = Discriminator(model.pred)
-#D_real = Discriminator(real_graph)
 
 pos_weight = float(sc_adj[0].shape[0] * sc_adj[0].shape[0] - sc_adj[0].sum()) / sc_adj[0].sum()
 norm = sc_adj[0].shape[0] * sc_adj[0].shape[0] / float((sc_adj[0].shape[0] * sc_adj[0].shape[0] - sc_adj[0].sum()) * 2)
-
-
-# Optimizer
-# with tf.name_scope('optimizer'):
-#     opt = OptimizerED(preds=model.pred,
-#                       labels=placeholders['labels'],
-#                       pos_weight=pos_weight,
-#                       norm=10000)
 
 # Initialize session
 sess = tf.Session()
 sess.run(tf.global_variables_initializer())
 #tf_vars = tf.trainable_variables()
+
+#Pre-train model
+for epoch in range(FLAGS.pre_epochs):
+    avg_pre_loss = 0
+    t = time.time()
+
+    for sub in train_index:
+        adj_sc_sub = sc_adj[sub]
+        adj_sc_sub = preprocess_graph(adj_sc_sub)
+        adj_fc_sub = fc_adj_pre[sub]
+        adj_label_sub = fc_adj[sub]
+        #for ind in range(adj_fc_sub.shape[0]):
+            #adj_fc_sub[ind] = preprocess_graph(adj_fc_sub[ind])
+        features_sc_sub = sc_features[sub]
+        features_fc_sub = fc_features[sub]
+
+        iterations = adj_fc_sub.shape[0]//(FLAGS.batch_size*FLAGS.windows_size)-1
+        round_data_len = iterations * FLAGS.batch_size * FLAGS.windows_size
+        adj_fc_data = adj_fc_sub[:round_data_len].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
+        features_fc_data = features_fc_sub[:round_data_len].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
+        ydata = adj_label_sub[FLAGS.windows_size:round_data_len + FLAGS.windows_size].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
+
+        avg_pre_loss_iter = 0
+        for i in range(iterations):
+            adj_sc = adj_sc_sub
+            adj_fc = adj_fc_data[:, i*FLAGS.windows_size:(i+1)*FLAGS.windows_size]
+            features_sc = features_sc_sub
+            features_fc = features_fc_data[:, i*FLAGS.windows_size:(i+1)*FLAGS.windows_size]
+            adj_label = ydata[:, i*FLAGS.windows_size:(i+1)*FLAGS.windows_size]
+
+            # Construct feed dictionary
+            feed_dict = construct_feed_dict(adj_sc, adj_fc, adj_label[:, 0], features_sc, features_fc, placeholders)
+            feed_dict.update({placeholders['dropout']: FLAGS.dropout})
+
+            # Run single weight update
+            outs = sess.run([lstmGAN.Pre_solver, lstmGAN.Pre_loss], feed_dict=feed_dict)
+
+            # Compute average loss
+            avg_pre_loss_iter = avg_pre_loss_iter + outs[1]
+            # print(outs[4])
+            # print(outs[3])
+            # print(outs[2])
+            # print("+++++++++++++++++++++++")
+        avg_pre_loss = avg_pre_loss + avg_pre_loss_iter/iterations
+    avg_pre_loss = avg_pre_loss/len(train_index)
+    print("PreEpoch:", '%04d' % (epoch + 1), "pre_train_loss=", "{:.5f}".format(avg_pre_loss),
+          "time=", "{:.5f}".format(time.time() - t))
+print("Pre Training Finished!")
 
 # Train model
 for epoch in range(FLAGS.epochs):
@@ -151,11 +191,11 @@ for epoch in range(FLAGS.epochs):
         features_sc_sub = sc_features[sub]
         features_fc_sub = fc_features[sub]
 
-        iterations = adj_fc_sub.shape[0]//(FLAGS.batch_size*FLAGS.windows_size)
+        iterations = adj_fc_sub.shape[0]//(FLAGS.batch_size*FLAGS.windows_size)-1
         round_data_len = iterations * FLAGS.batch_size * FLAGS.windows_size
         adj_fc_data = adj_fc_sub[:round_data_len].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
         features_fc_data = features_fc_sub[:round_data_len].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
-        ydata = adj_label_sub[1:round_data_len + 1].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
+        ydata = adj_label_sub[FLAGS.windows_size:round_data_len + FLAGS.windows_size].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
 
         avg_d_loss_iter = 0
         avg_g_loss_iter = 0
@@ -195,7 +235,6 @@ for epoch in range(FLAGS.epochs):
     avg_g_loss = avg_g_loss/len(train_index)
     print("Epoch:", '%04d' % (epoch + 1), "train_d_loss=", "{:.5f}".format(avg_d_loss),
           "train_g_loss=", "{:.5f}".format(avg_g_loss),
-       #"D_loss=", "{:.5f}".format(D_loss_curr),
           "time=", "{:.5f}".format(time.time() - t))
 
 print("Optimization Finished!")
@@ -212,13 +251,13 @@ for sub in test_index:
     features_sc_sub = sc_features[sub]
     features_fc_sub = fc_features[sub]
 
-    iterations = adj_fc_sub.shape[0] // (FLAGS.batch_size * FLAGS.windows_size)
+    iterations = adj_fc_sub.shape[0] // (FLAGS.batch_size * FLAGS.windows_size)-1
     round_data_len = iterations * FLAGS.batch_size * FLAGS.windows_size
     adj_fc_data = adj_fc_sub[:round_data_len].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number,
                                                       -1)
     features_fc_data = features_fc_sub[:round_data_len].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size,
                                                                 node_number, -1)
-    ydata = adj_label_sub[1:round_data_len + 1].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
+    ydata = adj_label_sub[FLAGS.windows_size:round_data_len + FLAGS.windows_size].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
     test_cost_iter = 0
     test_accuracy_iter = 0
     for i in range(iterations):
@@ -231,7 +270,7 @@ for sub in test_index:
         # Construct feed dictionary
         feed_dict = construct_feed_dict(adj_sc, adj_fc, adj_label[:, 0], features_sc, features_fc, placeholders)
         # Run single weight update
-        outs = sess.run([lstmGAN.G_loss, lstmGAN.G_sample, lstmGAN.labels], feed_dict=feed_dict)
+        outs = sess.run([lstmGAN.mse, lstmGAN.G_sample, lstmGAN.labels], feed_dict=feed_dict)
 
         # Compute average loss
         test_cost_iter = test_cost_iter + outs[0]

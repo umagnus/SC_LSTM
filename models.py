@@ -1,6 +1,6 @@
-from layers import GraphConvolution, GraphConvolutionSparse, InnerProductDecoder, GraphConvolutionSparseWindows
+from layers import GraphConvolution, GraphConvolutionSparse, InnerProductDecoder, GraphConvolutionSparseWindows, InnerProductLSTM, GraphConvolutionSparseBatch, InnerProduceDense
 import tensorflow as tf
-from keras.layers import Dense, LSTM, Dropout
+from keras.layers import Dense
 from numpy import *
 
 flags = tf.app.flags
@@ -119,11 +119,11 @@ class Generator(Model):
                                                      logging=self.logging)(self.inputs_fc)
 
         self.hidden2 = tf.reshape(self.hidden2, [FLAGS.batch_size, FLAGS.windows_size, self.node_num*FLAGS.hidden2])
-
-        self.lstm = LSTM(input_shape=(FLAGS.batch_size, FLAGS.windows_size, self.node_num*FLAGS.hidden2),
-                         output_dim=FLAGS.hidden3,
-                         activation=tf.nn.relu,
-                         return_sequences=False)(self.hidden2)
+        self.lstm = InnerProductLSTM(units=self.node_num*FLAGS.hidden3)(self.hidden2)
+        # self.lstm = LSTM(input_shape=(FLAGS.batch_size, FLAGS.windows_size, self.node_num*FLAGS.hidden2),
+        #                  units=self.node_num*FLAGS.hidden3,
+        #                  activation=tf.nn.relu,
+        #                  return_sequences=False)(self.hidden2)
         self.prefc = Dense(units=self.node_num*self.node_num,
                            activation=tf.nn.sigmoid)(self.lstm)
         self.reconstructions = tf.tile(self.reconstructions, [FLAGS.batch_size])
@@ -147,22 +147,15 @@ class Generator(Model):
         return self.outputs
 
 
-# def Discriminator(inputs, reuse=False):
-#     with tf.variable_scope('discriminator', reuse=reuse):
-#         keep_prob = 0.8
-#         hidden1 = Dense(units=FLAGS.hidden4,
-#                         activation=tf.nn.sigmoid)(inputs)
-#         hidden2 = tf.nn.dropout(hidden1, keep_prob)
-#         output = Dense(units=1,
-#                        activation=tf.nn.sigmoid)(hidden2)
-#     return output
-
 class Discriminator(Model):
     def __init__(self, **kwargs):
         super(Discriminator, self).__init__(**kwargs)
 
-    def __call__(self, inputs, *args, **kwargs):
-        self.inputs = inputs
+    def __call__(self, placeholders, inputs, node_num, num_features, *args, **kwargs):
+        self.node_num = node_num
+        self.inputs = tf.reshape(inputs, [FLAGS.batch_size, self.node_num, self.node_num])
+        self.fc_features = tf.reshape(placeholders['fc_features'][:, -1], [FLAGS.batch_size, self.node_num, -1])
+        self.input_dim = num_features
 
         self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)
 
@@ -171,15 +164,33 @@ class Discriminator(Model):
         return self.predict()
 
     def _build(self):
-        self.hidden1 = Dense(units=FLAGS.hidden4,
-                             activation=tf.nn.sigmoid)(self.inputs)
-        self.hidden2 = tf.nn.dropout(self.hidden1, keep_prob=0.8)
-        self.outputs = Dense(units=1,
-                            activation=tf.nn.sigmoid)(self.hidden2)
+        # self.hidden1 = Dense(units=FLAGS.hidden4,
+        #                      activation=tf.nn.relu)(self.inputs)
+        # self.hidden2 = tf.nn.dropout(self.hidden1, keep_prob=0.8)
+        self.hidden1 = GraphConvolutionSparseBatch(input_dim=self.input_dim,
+                                                   output_dim=FLAGS.hidden4,
+                                                   adj=self.inputs,
+                                                   features_nonzero=0,
+                                                   batch_size=FLAGS.batch_size,
+                                                   act=tf.nn.relu)(self.fc_features)
+        self.hidden1 = tf.reshape(self.hidden1, [FLAGS.batch_size, -1])
+        self.hidden2 = InnerProduceDense(input_dim=self.node_num*FLAGS.hidden4,
+                                         units=FLAGS.hidden5,
+                                         batch_size=FLAGS.batch_size,
+                                         dropout=0.1,
+                                         act=tf.nn.sigmoid)(self.hidden1)
+        self.hidden3 = InnerProduceDense(input_dim=FLAGS.hidden5,
+                                         units=FLAGS.hidden6,
+                                         batch_size=FLAGS.batch_size,
+                                         dropout=0.1,
+                                         act=tf.nn.relu)(self.hidden2)
+        self.outputs = InnerProduceDense(input_dim=FLAGS.hidden6,
+                                         units=1,
+                                         batch_size=FLAGS.batch_size,
+                                         act=tf.nn.sigmoid)(self.hidden3)
 
     def predict(self):
         return self.outputs
-
 
 
 class lstmGAN():
@@ -198,14 +209,25 @@ class lstmGAN():
         self.X = tf.reshape(self.labels, [FLAGS.batch_size, self.node_num*self.node_num])
 
         self.G_sample = self.generator(placeholders, num_features, features_nonzero, num_node)
-        self.D_fake = self.discriminator(self.G_sample)
-        self.D_real = self.discriminator(self.X)
+        self.D_fake = self.discriminator(placeholders, self.G_sample, num_node, num_features)
+        self.D_real = self.discriminator(placeholders, self.X, num_node, num_features)
 
-        self.D_loss = -tf.reduce_mean(tf.log(self.D_real) + tf.log(1. - self.D_fake))
+        self.D_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
+            logits=self.D_real, labels=tf.ones_like(self.D_real)))
+        self.D_loss_fake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
+            logits=self.D_fake, labels=tf.zeros_like(self.D_fake)))
+        self.D_loss = self.D_loss_real + self.D_loss_fake
+        self.G_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
+            logits=self.D_fake, labels=tf.ones_like(self.D_fake)))
+        #self.D_loss = -tf.reduce_mean(tf.log(self.D_real) + tf.log(1. - self.D_fake))
+        #self.G_loss = -tf.reduce_mean(tf.log(self.D_fake))
         preds_sub = tf.reshape(self.G_sample, [FLAGS.batch_size, 90*90])
         labels_sub = tf.reshape(self.labels, [FLAGS.batch_size, 90*90])
-        self.G_loss = tf.reduce_mean(tf.losses.huber_loss(preds_sub, labels_sub))
+        #pre_sub = tf.reshape(self.adj_fc[:, 7], [FLAGS.batch_size, 90*90])
+        self.Pre_loss = tf.reduce_mean(tf.losses.huber_loss(preds_sub, labels_sub))
+        self.mse = tf.reduce_mean(tf.losses.mean_squared_error(preds_sub,labels_sub))
 
         self.D_solver = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate).minimize(self.D_loss, var_list=self.discriminator.vars)
         self.G_solver = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate).minimize(self.G_loss, var_list=self.generator.vars)
+        self.Pre_solver = tf.train.AdamOptimizer(learning_rate=FLAGS.pre_learning_rate).minimize(self.Pre_loss, var_list=self.generator.vars)
 
