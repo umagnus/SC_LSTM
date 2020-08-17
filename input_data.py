@@ -99,9 +99,9 @@ def loadFSData(SC_path, FC_path):
             w_series = np.transpose(subj_mat_fc[w_start:w_end, :])
             w_edgeWeight = np.corrcoef(w_series)
             edgeWeight_list = MatToList(w_edgeWeight)
-            thindex = int(threshold * edgeWeight_list.shape[0])
-            thremax = edgeWeight_list[edgeWeight_list.argsort()[-1*thindex]]
-            w_edgeWeight = (w_edgeWeight-min(edgeWeight_list))/(max(edgeWeight_list)-min(edgeWeight_list))
+            # thindex = int(threshold * edgeWeight_list.shape[0])
+            # thremax = edgeWeight_list[edgeWeight_list.argsort()[-1*thindex]]
+            w_edgeWeight = (w_edgeWeight-min(edgeWeight_list))/(1-min(edgeWeight_list))
             # w_edgeWeight[w_edgeWeight >= thremax] = 1
             # w_edgeWeight[w_edgeWeight < thremax] = 0
             i_adj[w, :, :] = w_edgeWeight

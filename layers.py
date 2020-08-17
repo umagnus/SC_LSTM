@@ -122,6 +122,23 @@ class InnerProductDecoder(Layer):
         return outputs
 
 
+class InnerProductDecoderBatch(Layer):
+    """Decoder model layer for link prediction."""
+    def __init__(self, input_dim, dropout=0., act=tf.nn.tanh, **kwargs):
+        super(InnerProductDecoderBatch, self).__init__(**kwargs)
+        self.dropout = dropout
+        self.act = act
+
+    def _call(self, inputs):
+        inputs = tf.nn.dropout(inputs, 1-self.dropout)
+        x = tf.transpose(inputs, (0, 2, 1))
+        x = tf.matmul(inputs, x)
+        x = tf.reshape(x, [FLAGS.batch_size, -1])
+        x = tf.nn.relu(x)
+        outputs = self.act(x)
+        return outputs
+
+
 class GraphConvolutionSparseWindows(Layer):
     """Graph convolution layer for sparse inputs."""
     def __init__(self, input_dim, output_dim, adj, features_nonzero,  batch_size, window_size, dropout=0., act=tf.nn.relu, **kwargs):

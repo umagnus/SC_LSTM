@@ -1,4 +1,5 @@
-from layers import GraphConvolution, GraphConvolutionSparse, InnerProductDecoder, GraphConvolutionSparseWindows, InnerProductLSTM, GraphConvolutionSparseBatch, InnerProduceDense
+from layers import GraphConvolution, GraphConvolutionSparse, InnerProductDecoder, GraphConvolutionSparseWindows, \
+    InnerProductLSTM, GraphConvolutionSparseBatch, InnerProduceDense, InnerProductDecoderBatch
 import tensorflow as tf
 from keras.layers import Dense
 from numpy import *
@@ -96,17 +97,17 @@ class Generator(Model):
         return self.predict()
 
     def _build(self):
-        self.hidden1 = GraphConvolutionSparse(input_dim=self.node_num,
-                                              output_dim=FLAGS.hidden1,
-                                              adj=self.adj_sc,
-                                              features_nonzero=self.features_nonzero,
-                                              act=tf.nn.relu,
-                                              dropout=self.dropout,
-                                              logging=self.logging)(self.inputs_sc)
-
-        self.reconstructions = InnerProductDecoder(input_dim=FLAGS.hidden1,
-                                                   act=tf.nn.tanh,
-                                                   logging=self.logging)(self.hidden1)
+        # self.hidden1 = GraphConvolutionSparse(input_dim=self.node_num,
+        #                                       output_dim=FLAGS.hidden1,
+        #                                       adj=self.adj_sc,
+        #                                       features_nonzero=self.features_nonzero,
+        #                                       act=tf.nn.relu,
+        #                                       dropout=self.dropout,
+        #                                       logging=self.logging)(self.inputs_sc)
+        #
+        # self.reconstructions = InnerProductDecoder(input_dim=FLAGS.hidden1,
+        #                                            act=tf.nn.tanh,
+        #                                            logging=self.logging)(self.hidden1)
 
         self.hidden2 = GraphConvolutionSparseWindows(input_dim=self.input_dim,
                                                      output_dim=FLAGS.hidden2,
@@ -119,17 +120,38 @@ class Generator(Model):
                                                      logging=self.logging)(self.inputs_fc)
 
         self.hidden2 = tf.reshape(self.hidden2, [FLAGS.batch_size, FLAGS.windows_size, self.node_num*FLAGS.hidden2])
+        # self.hidden2 = tf.concat([self.hidden2, tf.reshape(tf.tile(self.adj_sc, [FLAGS.batch_size*FLAGS.windows_size, 1]),
+        #                                                    [FLAGS.batch_size, FLAGS.windows_size, -1])], 2)
+        # self.hidden2.set_shape([FLAGS.batch_size, FLAGS.windows_size, self.node_num*(FLAGS.hidden2+self.node_num)])
         self.lstm = InnerProductLSTM(units=self.node_num*FLAGS.hidden3)(self.hidden2)
-        # self.lstm = LSTM(input_shape=(FLAGS.batch_size, FLAGS.windows_size, self.node_num*FLAGS.hidden2),
-        #                  units=self.node_num*FLAGS.hidden3,
-        #                  activation=tf.nn.relu,
-        #                  return_sequences=False)(self.hidden2)
-        self.prefc = Dense(units=self.node_num*self.node_num,
-                           activation=tf.nn.sigmoid)(self.lstm)
-        self.reconstructions = tf.tile(self.reconstructions, [FLAGS.batch_size])
-        self.reconstructions = tf.reshape(self.reconstructions, [FLAGS.batch_size, -1])
-        self.pred = self.prefc + self.reconstructions
-        self.outputs = self.pred
+        self.lstm = tf.reshape(self.lstm, [FLAGS.batch_size, self.node_num, FLAGS.hidden3])
+        self.adj_sc = tf.tile(self.adj_sc, [FLAGS.batch_size, 1])
+        self.adj_sc = tf.reshape(self.adj_sc, [FLAGS.batch_size, self.node_num, self.node_num])
+        self.hidden1 = GraphConvolutionSparseBatch(input_dim=FLAGS.hidden3,
+                                                   output_dim=FLAGS.hidden1,
+                                                   adj=self.adj_sc,
+                                                   features_nonzero=self.features_nonzero,
+                                                   batch_size=FLAGS.batch_size,
+                                                   act=tf.nn.relu,
+                                                   dropout=self.dropout,
+                                                   logging=self.logging)(self.lstm)
+
+        self.reconstructions = InnerProductDecoderBatch(input_dim=FLAGS.hidden1,
+                                                        act=tf.nn.relu,
+                                                        logging=self.logging)(self.hidden1)
+        # self.hidden1 = tf.reshape(self.hidden1, [FLAGS.batch_size, -1])
+        # self.reconstructions = InnerProduceDense(input_dim=self.node_num*FLAGS.hidden1,
+        #                                          units=self.node_num*self.node_num,
+        #                                          batch_size=FLAGS.batch_size,
+        #                                          dropout=0.,
+        #                                          act=tf.nn.relu)(self.hidden1)
+        self.outputs = self.reconstructions
+        # self.prefc = Dense(units=self.node_num*self.node_num,
+        #                    activation=tf.nn.sigmoid)(self.lstm)
+        # self.reconstructions = tf.tile(self.reconstructions, [FLAGS.batch_size])
+        # self.reconstructions = tf.reshape(self.reconstructions, [FLAGS.batch_size, -1])
+        # self.pred = self.prefc + self.reconstructions
+        # self.outputs = self.pred
 
     def _loss(self):
         preds_sub = tf.reshape(self.outputs, [FLAGS.batch_size, 90*90])
@@ -178,7 +200,7 @@ class Discriminator(Model):
                                          units=FLAGS.hidden5,
                                          batch_size=FLAGS.batch_size,
                                          dropout=0.1,
-                                         act=tf.nn.sigmoid)(self.hidden1)
+                                         act=tf.nn.relu)(self.hidden1)
         self.hidden3 = InnerProduceDense(input_dim=FLAGS.hidden5,
                                          units=FLAGS.hidden6,
                                          batch_size=FLAGS.batch_size,

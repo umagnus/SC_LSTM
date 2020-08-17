@@ -9,6 +9,7 @@ os.environ['CUDA_VISIBLE_DEVICES'] = ""
 
 import tensorflow as tf
 import numpy as np
+import copy
 import scipy.sparse as sp
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -26,9 +27,9 @@ flags = tf.app.flags
 FLAGS = flags.FLAGS
 flags.DEFINE_float('pre_learning_rate', 0.0001, 'Initial pre learning rate')
 flags.DEFINE_float('learning_rate', 0.0002, 'Initial learning rate.')
-flags.DEFINE_integer('pre_epochs', 20, 'Number of epochs to pre-train')
+flags.DEFINE_integer('pre_epochs', 100, 'Number of epochs to pre-train')
 flags.DEFINE_integer('epochs', 50, 'Number of epochs to train.')
-flags.DEFINE_integer('hidden1', 32, 'Number of units in hidden layer 1.(sc)')
+flags.DEFINE_integer('hidden1', 128, 'Number of units in hidden layer 1.(sc)')
 flags.DEFINE_integer('hidden2', 16, 'Number of units in hidden layer 2.(fc)')
 flags.DEFINE_integer('hidden3', 32, 'Number of units in hidden layer 3.(lstm)')
 flags.DEFINE_integer('hidden4', 8, 'Number of units in hidden layer 4.(dis)')
@@ -48,10 +49,10 @@ dataset_str = FLAGS.dataset
 
 # Load data
 sc_features, sc_adj, fc_adj, fc_features = loadFSData("F:\Data\dMRI", "F:\Data\REST1")
-fc_adj_pre = fc_adj
+fc_adj_pre = copy.deepcopy(fc_adj)
 for i in range(len(fc_adj)):
     for j in range(len(fc_adj[i])):
-        fc_adj_pre[i][j] = preprocess_graph(fc_adj[i][j])
+        fc_adj[i][j] = preprocess_graph(fc_adj[i][j])
 # fc_adj = fc_adj_pre
 train_index = []
 test_index = []
@@ -135,8 +136,8 @@ for epoch in range(FLAGS.pre_epochs):
     for sub in train_index:
         adj_sc_sub = sc_adj[sub]
         adj_sc_sub = preprocess_graph(adj_sc_sub)
-        adj_fc_sub = fc_adj_pre[sub]
-        adj_label_sub = fc_adj[sub]
+        adj_fc_sub = fc_adj[sub]
+        adj_label_sub = fc_adj_pre[sub]
         #for ind in range(adj_fc_sub.shape[0]):
             #adj_fc_sub[ind] = preprocess_graph(adj_fc_sub[ind])
         features_sc_sub = sc_features[sub]
@@ -184,8 +185,8 @@ for epoch in range(FLAGS.epochs):
     for sub in train_index:
         adj_sc_sub = sc_adj[sub]
         adj_sc_sub = preprocess_graph(adj_sc_sub)
-        adj_fc_sub = fc_adj_pre[sub]
-        adj_label_sub = fc_adj[sub]
+        adj_fc_sub = fc_adj[sub]
+        adj_label_sub = fc_adj_pre[sub]
         #for ind in range(adj_fc_sub.shape[0]):
             #adj_fc_sub[ind] = preprocess_graph(adj_fc_sub[ind])
         features_sc_sub = sc_features[sub]
@@ -244,8 +245,8 @@ test_accuracy = 0
 for sub in test_index:
     adj_sc_sub = sc_adj[sub]
     adj_sc_sub = preprocess_graph(adj_sc_sub)
-    adj_fc_sub = fc_adj_pre[sub]
-    adj_label_sub = fc_adj[sub]
+    adj_fc_sub = fc_adj[sub]
+    adj_label_sub = fc_adj_pre[sub]
     # for ind in range(adj_fc_sub.shape[0]):
     #     adj_fc_sub[ind] = preprocess_graph(adj_fc_sub[ind])
     features_sc_sub = sc_features[sub]
