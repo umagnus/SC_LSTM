@@ -26,9 +26,9 @@ from preprocessing import preprocess_graph, construct_feed_dict, construct_feed_
 flags = tf.app.flags
 FLAGS = flags.FLAGS
 flags.DEFINE_float('pre_learning_rate', 0.0001, 'Initial pre learning rate')
-flags.DEFINE_float('learning_rate', 0.0002, 'Initial learning rate.')
-flags.DEFINE_integer('pre_epochs', 100, 'Number of epochs to pre-train')
-flags.DEFINE_integer('epochs', 50, 'Number of epochs to train.')
+flags.DEFINE_float('learning_rate', 0.0001, 'Initial learning rate.')
+flags.DEFINE_integer('pre_epochs', 150, 'Number of epochs to pre-train')
+flags.DEFINE_integer('epochs', 150, 'Number of epochs to train.')
 flags.DEFINE_integer('hidden1', 128, 'Number of units in hidden layer 1.(sc)')
 flags.DEFINE_integer('hidden2', 16, 'Number of units in hidden layer 2.(fc)')
 flags.DEFINE_integer('hidden3', 32, 'Number of units in hidden layer 3.(lstm)')
@@ -242,6 +242,7 @@ print("Optimization Finished!")
 
 test_cost = 0
 test_accuracy = 0
+hm_graph = np.zeros(8100)
 for sub in test_index:
     adj_sc_sub = sc_adj[sub]
     adj_sc_sub = preprocess_graph(adj_sc_sub)
@@ -261,6 +262,7 @@ for sub in test_index:
     ydata = adj_label_sub[FLAGS.windows_size:round_data_len + FLAGS.windows_size].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
     test_cost_iter = 0
     test_accuracy_iter = 0
+    hm_graph_iter = np.zeros(8100)
     for i in range(iterations):
         adj_sc = adj_sc_sub
         adj_fc = adj_fc_data[:, i * FLAGS.windows_size:(i + 1) * FLAGS.windows_size]
@@ -279,14 +281,19 @@ for sub in test_index:
         print(adj_label[:, 0].reshape((FLAGS.batch_size, 8100)))
         print(outs[1])
         print("++++++++++++++++++++++++")
+        hm_graph_iter = hm_graph_iter+np.sum(adj_label[:, 0].reshape((FLAGS.batch_size, 8100))-outs[1], axis=0)/FLAGS.batch_size
         # heatmap = sns.heatmap(abs(adj_label[:, 0].reshape((FLAGS.batch_size, 8100))-outs[1]), cmap='YlGnBu')
         # plt.show()
 
     test_cost = test_cost+test_cost_iter/iterations
     test_accuracy = test_accuracy + test_accuracy_iter/iterations
+    hm_graph = hm_graph + hm_graph_iter/iterations
 
 print("Test cost mse: " + str(test_cost/len(test_index)))
 print("Test accuracy: " + str(test_accuracy/len(test_index)))
+hm_graph = hm_graph/len(test_index)
+heatmap = sns.heatmap(np.reshape(hm_graph, (90, 90)), cmap='YlGnBu')
+plt.show()
 # roc_score, ap_score = get_roc_score(test_edges, test_edges_false)
 # print('Test ROC score: ' + str(roc_score))
 # print('Test AP score: ' + str(ap_score))

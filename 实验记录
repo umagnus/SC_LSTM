@@ -41,5 +41,11 @@ Test cost mse: 6.9616224592257485e-06
 use lstm features in graph-encoder & labels not prepare:
 Test cost mse: 0.029367411938054783
 
-use lstm features in graph-encoder & labels not prepare & GAN:
-Test cost mse: 0.06746766260383945
+use lstm features in graph-encoder & labels not prepare & GAN(100,50):
+Test cost mse: 0.03404211315424427
+
+use lstm features in graph-encoder & labels not prepare & GAN(50,50): graph1
+Test cost mse: 0.03644278885698632
+
+use lstm features in graph-encoder & labels not prepare & GAN(100,100): graph2
+Test cost mse: 0.03293089307599554
