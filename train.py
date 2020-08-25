@@ -27,9 +27,9 @@ flags = tf.app.flags
 FLAGS = flags.FLAGS
 flags.DEFINE_float('pre_learning_rate', 0.0001, 'Initial pre learning rate')
 flags.DEFINE_float('learning_rate', 0.0001, 'Initial learning rate.')
-flags.DEFINE_integer('pre_epochs', 150, 'Number of epochs to pre-train')
-flags.DEFINE_integer('epochs', 150, 'Number of epochs to train.')
-flags.DEFINE_integer('hidden1', 128, 'Number of units in hidden layer 1.(sc)')
+flags.DEFINE_integer('pre_epochs', 100, 'Number of epochs to pre-train')
+flags.DEFINE_integer('epochs', 100, 'Number of epochs to train.')
+flags.DEFINE_integer('hidden1', 32, 'Number of units in hidden layer 1.(sc)')
 flags.DEFINE_integer('hidden2', 16, 'Number of units in hidden layer 2.(fc)')
 flags.DEFINE_integer('hidden3', 32, 'Number of units in hidden layer 3.(lstm)')
 flags.DEFINE_integer('hidden4', 8, 'Number of units in hidden layer 4.(dis)')
