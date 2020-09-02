@@ -5,7 +5,7 @@ import time
 import os
 
 # Train on CPU (hide GPU) due to memory constraints
-os.environ['CUDA_VISIBLE_DEVICES'] = ""
+os.environ['CUDA_VISIBLE_DEVICES'] = "0"
 
 import tensorflow as tf
 import numpy as np
@@ -29,7 +29,7 @@ flags.DEFINE_float('pre_learning_rate', 0.0001, 'Initial pre learning rate')
 flags.DEFINE_float('learning_rate', 0.0001, 'Initial learning rate.')
 flags.DEFINE_integer('pre_epochs', 100, 'Number of epochs to pre-train')
 flags.DEFINE_integer('epochs', 100, 'Number of epochs to train.')
-flags.DEFINE_integer('hidden1', 32, 'Number of units in hidden layer 1.(sc)')
+flags.DEFINE_integer('hidden1', 128, 'Number of units in hidden layer 1.(sc)')
 flags.DEFINE_integer('hidden2', 16, 'Number of units in hidden layer 2.(fc)')
 flags.DEFINE_integer('hidden3', 32, 'Number of units in hidden layer 3.(lstm)')
 flags.DEFINE_integer('hidden4', 8, 'Number of units in hidden layer 4.(dis)')
@@ -48,7 +48,7 @@ model_str = FLAGS.model
 dataset_str = FLAGS.dataset
 
 # Load data
-sc_features, sc_adj, fc_adj, fc_features = loadFSData("F:\Data\dMRI", "F:\Data\REST1")
+sc_features, sc_adj, fc_adj, fc_features = loadFSData("H:\Data\dMRI", "H:\Data\REST1")
 fc_adj_pre = copy.deepcopy(fc_adj)
 for i in range(len(fc_adj)):
     for j in range(len(fc_adj[i])):
@@ -281,7 +281,7 @@ for sub in test_index:
         print(adj_label[:, 0].reshape((FLAGS.batch_size, 8100)))
         print(outs[1])
         print("++++++++++++++++++++++++")
-        hm_graph_iter = hm_graph_iter+np.sum(adj_label[:, 0].reshape((FLAGS.batch_size, 8100))-outs[1], axis=0)/FLAGS.batch_size
+        hm_graph_iter = hm_graph_iter+np.sum(abs(adj_label[:, 0].reshape((FLAGS.batch_size, 8100))-outs[1]), axis=0)/FLAGS.batch_size
         # heatmap = sns.heatmap(abs(adj_label[:, 0].reshape((FLAGS.batch_size, 8100))-outs[1]), cmap='YlGnBu')
         # plt.show()
 
@@ -292,7 +292,7 @@ for sub in test_index:
 print("Test cost mse: " + str(test_cost/len(test_index)))
 print("Test accuracy: " + str(test_accuracy/len(test_index)))
 hm_graph = hm_graph/len(test_index)
-heatmap = sns.heatmap(np.reshape(hm_graph, (90, 90)), cmap='YlGnBu')
+heatmap = sns.heatmap(np.reshape(hm_graph, (90, 90)), cmap='YlGnBu', vmin=0, vmax=0.5)
 plt.show()
 # roc_score, ap_score = get_roc_score(test_edges, test_edges_false)
 # print('Test ROC score: ' + str(roc_score))
