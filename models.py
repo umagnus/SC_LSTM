@@ -1,6 +1,7 @@
 from layers import GraphConvolution, GraphConvolutionSparse, InnerProductDecoder, GraphConvolutionSparseWindows, \
     InnerProductLSTM, GraphConvolutionSparseBatch, InnerProduceDense, InnerProductDecoderBatch
 import tensorflow as tf
+import tensorflow.contrib.slim as slim
 from keras.layers import Dense
 from numpy import *
 
@@ -123,7 +124,7 @@ class Generator(Model):
         # self.hidden2 = tf.concat([self.hidden2, tf.reshape(tf.tile(self.adj_sc, [FLAGS.batch_size*FLAGS.windows_size, 1]),
         #                                                    [FLAGS.batch_size, FLAGS.windows_size, -1])], 2)
         # self.hidden2.set_shape([FLAGS.batch_size, FLAGS.windows_size, self.node_num*(FLAGS.hidden2+self.node_num)])
-        self.lstm = InnerProductLSTM(units=self.node_num*FLAGS.hidden3)(self.hidden2)
+        self.lstm, _ = InnerProductLSTM(units=self.node_num*FLAGS.hidden3)(self.hidden2)
         self.lstm = tf.reshape(self.lstm, [FLAGS.batch_size, self.node_num, FLAGS.hidden3])
         self.adj_sc = tf.tile(self.adj_sc, [FLAGS.batch_size, 1])
         self.adj_sc = tf.reshape(self.adj_sc, [FLAGS.batch_size, self.node_num, self.node_num])
@@ -145,7 +146,10 @@ class Generator(Model):
         #                                          batch_size=FLAGS.batch_size,
         #                                          dropout=0.,
         #                                          act=tf.nn.relu)(self.hidden1)
-        self.outputs = self.reconstructions
+        self.reconstructions_reshape = tf.reshape(self.reconstructions, [FLAGS.batch_size, self.node_num, self.node_num])
+        self.diag_ones = tf.matrix_set_diag(self.reconstructions_reshape, tf.ones([FLAGS.batch_size, self.node_num]))
+        self.outputs = tf.reshape(self.diag_ones, [FLAGS.batch_size, -1])
+        # self.outputs = self.reconstructions
         # self.prefc = Dense(units=self.node_num*self.node_num,
         #                    activation=tf.nn.sigmoid)(self.lstm)
         # self.reconstructions = tf.tile(self.reconstructions, [FLAGS.batch_size])
@@ -169,13 +173,14 @@ class Generator(Model):
         return self.outputs
 
 
-class Discriminator(Model):
+class Discriminator_old(Model):
     def __init__(self, **kwargs):
-        super(Discriminator, self).__init__(**kwargs)
+        super(Discriminator_old, self).__init__(**kwargs)
 
     def __call__(self, placeholders, inputs, node_num, num_features, *args, **kwargs):
         self.node_num = node_num
         self.inputs = tf.reshape(inputs, [FLAGS.batch_size, self.node_num, self.node_num])
+        # self.inputs = inputs
         self.fc_features = tf.reshape(placeholders['fc_features'][:, -1], [FLAGS.batch_size, self.node_num, -1])
         self.input_dim = num_features
 
@@ -186,30 +191,85 @@ class Discriminator(Model):
         return self.predict()
 
     def _build(self):
-        # self.hidden1 = Dense(units=FLAGS.hidden4,
-        #                      activation=tf.nn.relu)(self.inputs)
-        # self.hidden2 = tf.nn.dropout(self.hidden1, keep_prob=0.8)
-        self.hidden1 = GraphConvolutionSparseBatch(input_dim=self.input_dim,
-                                                   output_dim=FLAGS.hidden4,
-                                                   adj=self.inputs,
-                                                   features_nonzero=0,
-                                                   batch_size=FLAGS.batch_size,
-                                                   act=tf.nn.relu)(self.fc_features)
-        self.hidden1 = tf.reshape(self.hidden1, [FLAGS.batch_size, -1])
-        self.hidden2 = InnerProduceDense(input_dim=self.node_num*FLAGS.hidden4,
-                                         units=FLAGS.hidden5,
-                                         batch_size=FLAGS.batch_size,
-                                         dropout=0.1,
-                                         act=tf.nn.relu)(self.hidden1)
-        self.hidden3 = InnerProduceDense(input_dim=FLAGS.hidden5,
-                                         units=FLAGS.hidden6,
-                                         batch_size=FLAGS.batch_size,
-                                         dropout=0.1,
-                                         act=tf.nn.relu)(self.hidden2)
-        self.outputs = InnerProduceDense(input_dim=FLAGS.hidden6,
-                                         units=1,
-                                         batch_size=FLAGS.batch_size,
-                                         act=tf.nn.sigmoid)(self.hidden3)
+        # self.hidden1 = GraphConvolutionSparseBatch(input_dim=self.input_dim,
+        #                                            output_dim=FLAGS.hidden4,
+        #                                            adj=self.inputs,
+        #                                            features_nonzero=0,
+        #                                            batch_size=FLAGS.batch_size,
+        #                                            act=tf.nn.relu)(self.fc_features)
+        # self.hidden1 = tf.reshape(self.hidden1, [FLAGS.batch_size, -1])
+        reuse = len([t for t in tf.global_variables() if t.name.startswith(self.name)]) > 0
+        with tf.variable_scope(self.name, reuse=reuse):
+            self.hidden1 = GraphConvolutionSparseBatch(input_dim=self.input_dim,
+                                                       output_dim=FLAGS.hidden4,
+                                                       adj=self.inputs,
+                                                       features_nonzero=0,
+                                                       batch_size=FLAGS.batch_size,
+                                                       act=tf.nn.relu)(tf.nn.l2_normalize(self.fc_features, dim=[1, 2]))
+            self.hidden1 = tf.reshape(self.hidden1, [FLAGS.batch_size, -1])
+            # self.hidden1 = slim.fully_connected(self.inputs, self.node_num*FLAGS.hidden4, activation_fn=tf.nn.relu)
+            self.hidden2 = slim.fully_connected(self.hidden1, FLAGS.hidden5, activation_fn=tf.nn.relu)
+            self.hidden3 = slim.fully_connected(self.hidden2, FLAGS.hidden6, activation_fn=tf.nn.relu)
+            self.outputs = slim.fully_connected(self.hidden3, 1, activation_fn=None)
+        # self.hidden1 = InnerProduceDense(input_dim=self.node_num*self.node_num,
+        #                                  units=self.node_num*FLAGS.hidden4,
+        #                                  batch_size=FLAGS.batch_size,
+        #                                  dropout=0.1,
+        #                                  act=tf.nn.leaky_relu)(self.inputs)
+        # self.hidden2 = InnerProduceDense(input_dim=self.node_num*FLAGS.hidden4,
+        #                                  units=FLAGS.hidden5,
+        #                                  batch_size=FLAGS.batch_size,
+        #                                  dropout=0.1,
+        #                                  act=tf.nn.leaky_relu)(self.hidden1)
+        # self.hidden3 = InnerProduceDense(input_dim=FLAGS.hidden5,
+        #                                  units=FLAGS.hidden6,
+        #                                  batch_size=FLAGS.batch_size,
+        #                                  dropout=0.1,
+        #                                  act=tf.nn.leaky_relu)(self.hidden2)
+        # self.outputs = InnerProduceDense(input_dim=FLAGS.hidden6,
+        #                                  units=1,
+        #                                  batch_size=FLAGS.batch_size,
+        #                                  act=lambda x: x)(self.hidden3)
+
+    def predict(self):
+        return self.outputs
+
+
+class Discriminator(Model):
+    def __init__(self, **kwargs):
+        super(Discriminator, self).__init__(**kwargs)
+
+    def __call__(self, placeholders, inputs, node_num, num_features, *args, **kwargs):
+        self.node_num = node_num
+        self.inputs = tf.reshape(tf.concat([tf.reshape(placeholders['adj_fc_pre'], [FLAGS.batch_size, FLAGS.windows_size, -1]), tf.reshape(inputs, [FLAGS.batch_size, 1, -1])], 1), [FLAGS.batch_size, FLAGS.windows_size+1, self.node_num*self.node_num])
+        self.adj_fc = tf.reshape(tf.concat([tf.reshape(placeholders['adj_fc_pre'], [FLAGS.batch_size, FLAGS.windows_size, -1]), tf.reshape(inputs, [FLAGS.batch_size, 1, -1])], 1), [FLAGS.batch_size, FLAGS.windows_size+1, self.node_num, self.node_num])
+        self.fc_features = tf.reshape(placeholders['fc_features'][:, -1], [FLAGS.batch_size, self.node_num, -1])
+        self.input_dim = self.node_num
+
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)
+
+        self.build()
+
+        return self.predict()
+
+    def _build(self):
+        reuse = len([t for t in tf.global_variables() if t.name.startswith(self.name)]) > 0
+        with tf.variable_scope(self.name, reuse=reuse):
+            self.hiddeng = GraphConvolutionSparseWindows(input_dim=self.input_dim,
+                                                         output_dim=FLAGS.hidden2,
+                                                         adj=self.adj_fc,
+                                                         features_nonzero=0,
+                                                         act=tf.nn.relu,
+                                                         batch_size=FLAGS.batch_size,
+                                                         window_size=FLAGS.windows_size+1,
+                                                         logging=self.logging)(tf.eye(self.node_num, batch_shape=[FLAGS.batch_size, FLAGS.windows_size+1]))
+            self.hiddeng = tf.reshape(self.hiddeng,
+                                      [FLAGS.batch_size, FLAGS.windows_size+1, self.node_num * FLAGS.hidden2])
+            _, self.hidden1 = InnerProductLSTM(units=self.node_num * FLAGS.hidden3)(self.hiddeng)
+            self.hidden1 = tf.reshape(self.hidden1, [FLAGS.batch_size, -1])
+            self.hidden2 = slim.fully_connected(self.hidden1, FLAGS.hidden5, activation_fn=tf.nn.relu)
+            self.hidden3 = slim.fully_connected(self.hidden2, FLAGS.hidden6, activation_fn=tf.nn.relu)
+            self.outputs = slim.fully_connected(self.hidden3, 1, activation_fn=tf.nn.sigmoid)
 
     def predict(self):
         return self.outputs
@@ -234,6 +294,12 @@ class lstmGAN():
         self.D_fake = self.discriminator(placeholders, self.G_sample, num_node, num_features)
         self.D_real = self.discriminator(placeholders, self.X, num_node, num_features)
 
+        eps = tf.random_uniform([FLAGS.batch_size, 1], minval=0., maxval=1.)
+        X_inter = eps * self.X + (1. - eps) * self.G_sample  # 按照eps比例生成真假样本采样X_inter
+        grad = tf.gradients(self.discriminator(placeholders, X_inter, num_node, num_features), X_inter)[0]
+        grad_norm = tf.sqrt(tf.reduce_sum(tf.square(grad), axis=1))
+        grad_pen = 10 * tf.reduce_mean(tf.nn.relu(grad_norm - 1.))  # 梯度惩罚项 (约束项)
+
         self.D_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
             logits=self.D_real, labels=tf.ones_like(self.D_real)))
         self.D_loss_fake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
@@ -245,11 +311,33 @@ class lstmGAN():
         #self.G_loss = -tf.reduce_mean(tf.log(self.D_fake))
         preds_sub = tf.reshape(self.G_sample, [FLAGS.batch_size, 90*90])
         labels_sub = tf.reshape(self.labels, [FLAGS.batch_size, 90*90])
+
         #pre_sub = tf.reshape(self.adj_fc[:, 7], [FLAGS.batch_size, 90*90])
         self.Pre_loss = tf.reduce_mean(tf.losses.huber_loss(preds_sub, labels_sub))
-        self.mse = tf.reduce_mean(tf.losses.mean_squared_error(preds_sub,labels_sub))
+        self.mse = tf.reduce_mean(tf.losses.mean_squared_error(preds_sub, labels_sub))
+        self.correct_prediction = tf.equal(tf.cast(tf.greater_equal(preds_sub, 0.5), tf.int32),
+                                           tf.cast(labels_sub, tf.int32))
+        #self.accuracy = tf.reduce_mean(tf.cast(self.correct_prediction, tf.float32))
 
-        self.D_solver = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate).minimize(self.D_loss, var_list=self.discriminator.vars)
-        self.G_solver = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate).minimize(self.G_loss, var_list=self.generator.vars)
+        ones_like_actuals = tf.ones_like(tf.cast(tf.greater_equal(labels_sub, 0.5), tf.int32))
+        zeros_like_actuals = tf.zeros_like(tf.cast(tf.greater_equal(labels_sub, 0.5), tf.int32))
+        ones_like_predictions = tf.ones_like(tf.cast(tf.greater_equal(preds_sub, 0.5), tf.int32))
+        zeros_like_predictions = tf.zeros_like(tf.cast(tf.greater_equal(preds_sub, 0.5), tf.int32))
+
+        tp = tf.reduce_sum(tf.cast(tf.logical_and(tf.equal(tf.cast(tf.greater_equal(labels_sub, 0.5), tf.int32), ones_like_actuals), tf.equal(tf.cast(tf.greater_equal(preds_sub, 0.5), tf.int32), ones_like_predictions)), tf.float32))
+        tn = tf.reduce_sum(tf.cast(tf.logical_and(tf.equal(tf.cast(tf.greater_equal(labels_sub, 0.5), tf.int32), zeros_like_actuals), tf.equal(tf.cast(tf.greater_equal(preds_sub, 0.5), tf.int32), zeros_like_predictions)), tf.float32))
+        fp = tf.reduce_sum(tf.cast(tf.logical_and(tf.equal(tf.cast(tf.greater_equal(labels_sub, 0.5), tf.int32), zeros_like_actuals), tf.equal(tf.cast(tf.greater_equal(preds_sub, 0.5), tf.int32), ones_like_predictions)), tf.float32))
+        fn = tf.reduce_sum(tf.cast(tf.logical_and(tf.equal(tf.cast(tf.greater_equal(labels_sub, 0.5), tf.int32), ones_like_actuals), tf.equal(tf.cast(tf.greater_equal(preds_sub, 0.5), tf.int32), zeros_like_predictions)), tf.float32))
+
+        tpr = tp / (tp + fn)
+        self.recall = tpr
+        self.precision = tp / (tp + fp)
+        self.accuracy = (tp+tn)/(tp+fp+fn+tn)
+
+        # self.D_loss = tf.reduce_mean(self.D_fake - self.D_real) #+ grad_pen
+        # self.G_loss = -tf.reduce_mean(self.D_fake)# + 10 * self.mse
+
+        self.D_solver = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate, beta1=0., beta2=0.9).minimize(self.D_loss, var_list=self.discriminator.vars)
+        self.G_solver = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate, beta1=0., beta2=0.9).minimize(self.G_loss, var_list=self.generator.vars)
         self.Pre_solver = tf.train.AdamOptimizer(learning_rate=FLAGS.pre_learning_rate).minimize(self.Pre_loss, var_list=self.generator.vars)
 

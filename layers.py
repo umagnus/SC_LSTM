@@ -69,7 +69,7 @@ class GraphConvolution(Layer):
     def __init__(self, input_dim, output_dim, adj, dropout=0., act=tf.nn.relu, **kwargs):
         super(GraphConvolution, self).__init__(**kwargs)
         with tf.variable_scope(self.name + '_vars'):
-            self.vars['weights'] = weight_variable_glorot(input_dim, output_dim, name="weights")
+            self.vars['weights'] = weight_variable_glorot(input_dim, output_dim, name="gc_weights")
         self.dropout = dropout
         self.adj = adj
         self.act = act
@@ -88,7 +88,7 @@ class GraphConvolutionSparse(Layer):
     def __init__(self, input_dim, output_dim, adj, features_nonzero, dropout=0., act=tf.nn.relu, **kwargs):
         super(GraphConvolutionSparse, self).__init__(**kwargs)
         with tf.variable_scope(self.name + '_vars'):
-            self.vars['weights'] = weight_variable_glorot(input_dim, output_dim, name="weights")
+            self.vars['weights'] = weight_variable_glorot(input_dim, output_dim, name="gcs_weights")
         self.dropout = dropout
         self.adj = adj
         self.act = act
@@ -98,7 +98,6 @@ class GraphConvolutionSparse(Layer):
     def _call(self, inputs):
         x = inputs
         #x = dropout_sparse(x, 1-self.dropout, self.features_nonzero)
-        print(x)
         x = tf.matmul(x, self.vars['weights'])
         x = tf.matmul(self.adj, x)
         outputs = self.act(x)
@@ -144,7 +143,7 @@ class GraphConvolutionSparseWindows(Layer):
     def __init__(self, input_dim, output_dim, adj, features_nonzero,  batch_size, window_size, dropout=0., act=tf.nn.relu, **kwargs):
         super(GraphConvolutionSparseWindows, self).__init__(**kwargs)
         with tf.variable_scope(self.name + '_vars'):
-            self.vars['weights'] = weight_variable_glorot_windows(batch_size, window_size, input_dim, output_dim, name="weights")
+            self.vars['weights'] = weight_variable_glorot_windows(batch_size, window_size, input_dim, output_dim, name="gcsw_weights")
         self.dropout = dropout
         self.adj = adj
         self.act = act
@@ -154,7 +153,6 @@ class GraphConvolutionSparseWindows(Layer):
     def _call(self, inputs):
         x = inputs
         #x = dropout_sparse(x, 1-self.dropout, self.features_nonzero)
-        print(x)
         x = tf.matmul(x, self.vars['weights'])
         x = tf.matmul(self.adj, x)
         outputs = self.act(x)
@@ -166,7 +164,7 @@ class GraphConvolutionSparseBatch(Layer):
     def __init__(self, input_dim, output_dim, adj, features_nonzero,  batch_size, dropout=0., act=tf.nn.relu, **kwargs):
         super(GraphConvolutionSparseBatch, self).__init__(**kwargs)
         with tf.variable_scope(self.name + '_vars'):
-            self.vars['weights'] = weight_variable_glorot_batch(batch_size, input_dim, output_dim, name="weights")
+            self.vars['weights'] = weight_variable_glorot_batch(batch_size, input_dim, output_dim, name="gcsb_weights")
         self.dropout = dropout
         self.adj = adj
         self.act = act
@@ -176,7 +174,6 @@ class GraphConvolutionSparseBatch(Layer):
     def _call(self, inputs):
         x = inputs
         #x = dropout_sparse(x, 1-self.dropout, self.features_nonzero)
-        print(x)
         x = tf.matmul(x, self.vars['weights'])
         x = tf.matmul(self.adj, x)
         outputs = self.act(x)
@@ -197,15 +194,16 @@ class InnerProductLSTM(Layer):
                                                    dtype=tf.float32,
                                                    time_major=False)
         outputs = tf.reshape(h, [-1, self.units])
-        return outputs
+        c_outputs = tf.reshape(c, [-1, self.units])
+        return outputs, c_outputs
 
 
 class InnerProduceDense(Layer):
     def __init__(self, input_dim, units, batch_size, dropout=0., act=tf.nn.sigmoid, **kwargs):
         super(InnerProduceDense, self).__init__(**kwargs)
         with tf.variable_scope(self.name + '_vars'):
-            self.vars['weights'] = weight_variable_glorot(input_dim, units, name="weights")
-            self.vars['bias'] = tf.Variable(tf.zeros(shape=[units]), name="bias")
+            self.vars['weights'] = weight_variable_glorot(input_dim, units, name="ipd_weights")
+            self.vars['bias'] = tf.Variable(tf.zeros(shape=[units]), name="ipd_bias")
         self.units = units
         self.dropout = dropout
         self.input_dim = input_dim

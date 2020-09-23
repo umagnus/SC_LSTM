@@ -5,6 +5,7 @@ import networkx as nx
 import scipy.sparse as sp
 import os
 from scipy import io
+from paramaters import FLAGS
 import preprocessing
 
 
@@ -82,9 +83,9 @@ def loadFSData(SC_path, FC_path):
         feature.append(np.identity(90).tolist())
         adj.append(subj_mat_sc)
     time_length = 1200
-    window_length = 40
+    window_length = FLAGS.window_length
     node_number = 90
-    threshold = 0.1
+    threshold = 0.9
     window_number = time_length - window_length
     for FCfiles in FC_list:
         subj_dir = os.path.join(FC_path, FCfiles, FC_dir)
@@ -98,9 +99,10 @@ def loadFSData(SC_path, FC_path):
             w_end = w_start + window_length
             w_series = np.transpose(subj_mat_fc[w_start:w_end, :])
             w_edgeWeight = np.corrcoef(w_series)
-            edgeWeight_list = MatToList(w_edgeWeight)
-            # thindex = int(threshold * edgeWeight_list.shape[0])
-            # thremax = edgeWeight_list[edgeWeight_list.argsort()[-1*thindex]]
+            #edgeWeight_list = MatToList(w_edgeWeight)
+            edgeWeight_list = w_edgeWeight.reshape((-1))
+            thindex = int(threshold * edgeWeight_list.shape[0])
+            thremax = edgeWeight_list[edgeWeight_list.argsort()[-1*thindex]]
             w_edgeWeight = (w_edgeWeight-min(edgeWeight_list))/(1-min(edgeWeight_list))
             # w_edgeWeight[w_edgeWeight >= thremax] = 1
             # w_edgeWeight[w_edgeWeight < thremax] = 0
