@@ -107,7 +107,9 @@ def test_epoch(test_sess, epochs):
         test_train_it = []
         test_test_it = []
         for i in range(test_iterations):
+            if i < int(test_iterations * 0.8):
                 test_train_it.append(i)
+            else:
                 test_test_it.append(i)
         test_round_data_len = test_iterations * FLAGS.batch_size * FLAGS.windows_size
         test_adj_fc_data = test_adj_fc_sub[:test_round_data_len].reshape(FLAGS.batch_size, test_iterations * FLAGS.windows_size,
@@ -149,8 +151,8 @@ def test_epoch(test_sess, epochs):
                                                    axis=0) / FLAGS.batch_size
             label_graph = test_adj_label[:, 0].reshape((FLAGS.batch_size, 8100))
             pred_graph = test_outs[1]
-            for batch in range(FLAGS.batch_size):
-                draw_graph(label_graph, pred_graph, batch, epochs, test_i)
+            # for batch in range(FLAGS.batch_size):
+            #     draw_graph(label_graph, pred_graph, batch, epochs, test_i)
 
         test_cost = test_cost + test_cost_iter / test_iterations
         test_acc = test_acc + test_acc_iter / test_iterations
