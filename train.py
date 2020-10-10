@@ -24,6 +24,7 @@ from models import Generator, Discriminator, lstmGAN
 from preprocessing import preprocess_graph, construct_feed_dict, construct_feed_dict_discriminator, sparse_to_tuple, mask_test_edges
 from paramaters import FLAGS
 
+np.set_printoptions(suppress=True)
 model_str = FLAGS.model
 dataset_str = FLAGS.dataset
 
@@ -50,7 +51,8 @@ placeholders = {
     'adj_sc': tf.placeholder(tf.float32),
     'labels': tf.placeholder(tf.float32),
     'dropout': tf.placeholder_with_default(0., shape=()),
-    'adj_fc_pre': tf.placeholder(tf.float32)
+    'adj_fc_pre': tf.placeholder(tf.float32),
+    'labels_feature': tf.placeholder(tf.float32)
 }
 
 time_length = 1200
@@ -71,13 +73,13 @@ def draw_graph(label_graph, pred_graph, batch, epochs, test_i):
     fig_label = sns.heatmap(np.reshape(label_graph[batch], (90, 90)), ax=ax, cbar_ax=cbar_ax,
                             cmap='YlGnBu', vmin=0, vmax=1)
     heatmap_label = fig_label.get_figure()
-    heatmap_label.savefig('./heatmap_new/' + 'iter=' + str(test_i) + '_batch=' + str(batch) +
+    heatmap_label.savefig('./heatmap_new_2/' + 'iter=' + str(test_i) + '_batch=' + str(batch) +
                           'label_GAN_gcn_lstm_pre_train_' + str(FLAGS.pre_epochs) + '_train_' + str(
         epochs) + '.jpg', dpi=400)
     fig_pred = sns.heatmap(np.reshape(pred_graph[batch], (90, 90)), ax=ax, cbar_ax=cbar_ax,
                            cmap='YlGnBu', vmin=0, vmax=1)
     heatmap_pred = fig_pred.get_figure()
-    heatmap_pred.savefig('./heatmap_new/' + 'iter=' + str(test_i) + '_batch=' + str(batch) +
+    heatmap_pred.savefig('./heatmap_new_2/' + 'iter=' + str(test_i) + '_batch=' + str(batch) +
                          'pred_GAN_gcn_lstm_pre_train_' + str(FLAGS.pre_epochs) + '_train_' + str(
         epochs) + '.jpg', dpi=400)
     del fig_label
@@ -93,6 +95,7 @@ def test_epoch(test_sess, epochs):
     test_rec = 0
     test_pre = 0
     hm_graph = np.zeros(8100)
+
     for test_sub in test_index:
         test_adj_sc_sub = sc_adj[test_sub]
         test_adj_sc_sub = preprocess_graph(test_adj_sc_sub)
@@ -116,6 +119,9 @@ def test_epoch(test_sess, epochs):
                                                                          node_number, -1)
         test_features_fc_data = test_features_fc_sub[:test_round_data_len].reshape(FLAGS.batch_size, test_iterations * FLAGS.windows_size,
                                                                                    node_number, -1)
+        test_labels_feature_data = test_features_fc_sub[FLAGS.windows_size:test_round_data_len + FLAGS.windows_size].reshape(FLAGS.batch_size,
+                                                                                                             test_iterations * FLAGS.windows_size,
+                                                                                                             node_number, -1)
         test_adj_fc_pre_data = test_adj_label_sub[:test_round_data_len].reshape(FLAGS.batch_size, test_iterations * FLAGS.windows_size,
                                                                                 node_number, -1)
         test_ydata = test_adj_label_sub[FLAGS.windows_size:test_round_data_len + FLAGS.windows_size].reshape(FLAGS.batch_size,
@@ -126,18 +132,22 @@ def test_epoch(test_sess, epochs):
         test_rec_iter = 0
         test_pre_iter = 0
         hm_graph_iter = np.zeros(8100)
+        test_adj_fc = test_adj_fc_data[:, test_test_it[0] * FLAGS.windows_size:(test_test_it[0] + 1) * FLAGS.windows_size]
+        test_features_fc = test_features_fc_data[:, test_test_it[0] * FLAGS.windows_size:(test_test_it[0] + 1) * FLAGS.windows_size]
         for test_i in test_test_it:
             test_adj_sc = test_adj_sc_sub
-            test_adj_fc = test_adj_fc_data[:, test_i * FLAGS.windows_size:(test_i + 1) * FLAGS.windows_size]
+            # test_adj_fc = test_adj_fc_data[:, test_i * FLAGS.windows_size:(test_i + 1) * FLAGS.windows_size]
             test_features_sc = test_features_sc_sub
-            test_features_fc = test_features_fc_data[:, test_i * FLAGS.windows_size:(test_i + 1) * FLAGS.windows_size]
+            # test_features_fc = test_features_fc_data[:, test_i * FLAGS.windows_size:(test_i + 1) * FLAGS.windows_size]
+            test_labels_feature = test_labels_feature_data[:, test_i * FLAGS.windows_size:(test_i + 1) * FLAGS.windows_size][:, 0, :, 0]
             test_adj_fc_pre = test_adj_fc_pre_data[:, test_i * FLAGS.windows_size:(test_i + 1) * FLAGS.windows_size]
             test_adj_label = test_ydata[:, test_i * FLAGS.windows_size:(test_i + 1) * FLAGS.windows_size]
 
             # Construct feed dictionary
-            test_feed_dict = construct_feed_dict(test_adj_sc, test_adj_fc, test_adj_label[:, 0], test_features_sc, test_features_fc, test_adj_fc_pre, placeholders)
+            test_feed_dict = construct_feed_dict(test_adj_sc, test_adj_fc, test_adj_label[:, 0], test_features_sc,
+                                                 test_features_fc, test_adj_fc_pre, test_labels_feature, placeholders)
             # Run single weight update
-            test_outs = test_sess.run([lstmGAN.mse, lstmGAN.G_sample, lstmGAN.accuracy, lstmGAN.recall, lstmGAN.precision], feed_dict=test_feed_dict)
+            test_outs = test_sess.run([lstmGAN.mse, lstmGAN.G_sample, lstmGAN.feature_mse, lstmGAN.total_Pre_loss, lstmGAN.precision, lstmGAN.labels_feature], feed_dict=test_feed_dict)
 
             # Compute average loss
             test_cost_iter = test_cost_iter + test_outs[0]
@@ -147,12 +157,17 @@ def test_epoch(test_sess, epochs):
             # print(adj_label[:, 0].reshape((FLAGS.batch_size, 8100)))
             # print(outs[1])
             # print("++++++++++++++++++++++++")
+            test_adj_fc = np.concatenate((test_adj_fc, test_outs[1].reshape((FLAGS.batch_size, FLAGS.remove_length, 90, 90))), axis=1)
+            test_adj_fc = test_adj_fc[:, 1:, :]
+            nxt_feature = np.concatenate((test_features_fc[:, -1, :, 1:], test_outs[5].reshape((FLAGS.batch_size, 90, FLAGS.remove_length))), axis=2)
+            nxt_feature = nxt_feature.reshape((FLAGS.batch_size, 1, 90, FLAGS.window_length))
+            test_features_fc = np.concatenate((test_features_fc[:, 1:, :], nxt_feature), axis=1)
             hm_graph_iter = hm_graph_iter + np.sum(abs(test_adj_label[:, 0].reshape((FLAGS.batch_size, 8100)) - test_outs[1]),
                                                    axis=0) / FLAGS.batch_size
             label_graph = test_adj_label[:, 0].reshape((FLAGS.batch_size, 8100))
             pred_graph = test_outs[1]
             # for batch in range(FLAGS.batch_size):
-            #     draw_graph(label_graph, pred_graph, batch, epochs, test_i)
+            draw_graph(label_graph, pred_graph, 0, epochs, test_i)
 
         test_cost = test_cost + test_cost_iter / test_iterations
         test_acc = test_acc + test_acc_iter / test_iterations
@@ -161,8 +176,8 @@ def test_epoch(test_sess, epochs):
         hm_graph = hm_graph + hm_graph_iter / test_iterations
 
     print("Test cost mse: " + str(test_cost / len(test_index)))
-    print("Test cost accuracy: " + str(test_acc / len(test_index)))
-    print("Test cost recall: " + str(test_rec / len(test_index)))
+    print("Test cost feature_mse: " + str(test_acc / len(test_index)))
+    print("Test cost total_Pre_loss: " + str(test_rec / len(test_index)))
     print("Test cost precision:" + str(test_pre / len(test_index)))
     f = open('test_result_0_0.5.txt', 'a')
     f.write('GAN_gcn_lstm_pre_train_' + str(FLAGS.pre_epochs) + '_train_' + str(epochs) + ' Test cost mse: ' + str(test_cost / len(test_index))
@@ -172,7 +187,7 @@ def test_epoch(test_sess, epochs):
     hm_graph = hm_graph / len(test_index)
     fig = sns.heatmap(np.reshape(hm_graph, (90, 90)), ax=ax, cbar_ax=cbar_ax, cmap='YlGnBu', vmin=0, vmax=0.15)
     heatmap = fig.get_figure()
-    heatmap.savefig('./heatmap_new/' + 'GAN_gcn_lstm_pre_train_' + str(FLAGS.pre_epochs) + '_train_' + str(epochs) + '.jpg', dpi=400)
+    heatmap.savefig('./heatmap_new_0/' + 'GAN_gcn_lstm_pre_train_' + str(FLAGS.pre_epochs) + '_train_' + str(epochs) + '.jpg', dpi=400)
     # plt.savefig('./heatmap/' + 'pre_train_' + str(FLAGS.pre_epochs) + '_train_' + str(epochs) + '.jpg')
     # plt.show()
 
@@ -218,6 +233,7 @@ for epoch in range(FLAGS.pre_epochs):
         round_data_len = iterations * FLAGS.batch_size * FLAGS.windows_size
         adj_fc_data = adj_fc_sub[:round_data_len].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
         features_fc_data = features_fc_sub[:round_data_len].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
+        labels_feature_data = features_fc_sub[FLAGS.windows_size:round_data_len + FLAGS.windows_size].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
         adj_fc_pre_data = adj_label_sub[:round_data_len].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size,
                                                                                 node_number, -1)
         ydata = adj_label_sub[FLAGS.windows_size:round_data_len + FLAGS.windows_size].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
@@ -231,15 +247,18 @@ for epoch in range(FLAGS.pre_epochs):
             adj_fc = adj_fc_data[:, i*FLAGS.windows_size:(i+1)*FLAGS.windows_size]
             features_sc = features_sc_sub
             features_fc = features_fc_data[:, i*FLAGS.windows_size:(i+1)*FLAGS.windows_size]
+            labels_feature = labels_feature_data[:, i * FLAGS.windows_size:(i + 1) * FLAGS.windows_size][:, 0, :, 0]
             adj_fc_pre = adj_fc_pre_data[:, i * FLAGS.windows_size:(i + 1) * FLAGS.windows_size]
             adj_label = ydata[:, i*FLAGS.windows_size:(i+1)*FLAGS.windows_size]
 
             # Construct feed dictionary
-            feed_dict = construct_feed_dict(adj_sc, adj_fc, adj_label[:, 0], features_sc, features_fc, adj_fc_pre, placeholders)
+            feed_dict = construct_feed_dict(adj_sc, adj_fc, adj_label[:, 0], features_sc, features_fc, adj_fc_pre, labels_feature, placeholders)
             feed_dict.update({placeholders['dropout']: FLAGS.dropout})
 
             # Run single weight update
-            outs = sess.run([lstmGAN.Pre_solver, lstmGAN.Pre_loss, lstmGAN.accuracy, lstmGAN.recall, lstmGAN.precision], feed_dict=feed_dict)
+            outs_adj = sess.run([lstmGAN.Pre_solver], feed_dict=feed_dict)
+            outs_feature = sess.run([lstmGAN.Pre_feature_solver], feed_dict=feed_dict)
+            outs = sess.run([lstmGAN.Total_Pre_solver, lstmGAN.Pre_loss, lstmGAN.feature_mse, lstmGAN.total_Pre_loss, lstmGAN.precision, lstmGAN.pred_feature_sub, lstmGAN.label_feature_sub], feed_dict=feed_dict)
 
             # Compute average loss
             avg_pre_loss_iter = avg_pre_loss_iter + outs[1]
@@ -247,8 +266,9 @@ for epoch in range(FLAGS.pre_epochs):
             avg_pre_rec_iter = avg_pre_rec_iter + outs[3]
             avg_pre_pre_iter = avg_pre_pre_iter + outs[4]
             # print(outs[4])
-            # print(outs[3])
-            # print(outs[2])
+            # print(outs[5]-outs[6])
+            # print("-----------------------")
+            # print(outs[6])
             # print("+++++++++++++++++++++++")
         avg_pre_loss = avg_pre_loss + avg_pre_loss_iter/iterations
         avg_pre_acc = avg_pre_acc + avg_pre_acc_iter/iterations
@@ -259,8 +279,8 @@ for epoch in range(FLAGS.pre_epochs):
     avg_pre_rec = avg_pre_rec/len(train_index)
     avg_pre_pre = avg_pre_pre/len(train_index)
     print("PreEpoch:", '%04d' % (epoch + 1), "pre_train_loss=", "{:.5f}".format(avg_pre_loss),
-          "pre_train_acc=", "{:.5f}".format(avg_pre_acc),
-          "pre_train_recall=", "{:.5f}".format(avg_pre_rec),
+          "pre_train_feature_mse=", "{:.5f}".format(avg_pre_acc),
+          "pre_train_total_Pre_loss=", "{:.5f}".format(avg_pre_rec),
           "pre_train_precision=", "{:.5f}".format(avg_pre_pre),
           "time=", "{:.5f}".format(time.time() - t))
 print("Pre Training Finished!")
@@ -295,6 +315,7 @@ for epoch in range(FLAGS.epochs):
         round_data_len = iterations * FLAGS.batch_size * FLAGS.windows_size
         adj_fc_data = adj_fc_sub[:round_data_len].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
         features_fc_data = features_fc_sub[:round_data_len].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
+        labels_feature_data = features_fc_sub[FLAGS.windows_size:round_data_len + FLAGS.windows_size].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
         adj_fc_pre_data = adj_label_sub[:round_data_len].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size,
                                                                                 node_number, -1)
         ydata = adj_label_sub[FLAGS.windows_size:round_data_len + FLAGS.windows_size].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
@@ -307,11 +328,12 @@ for epoch in range(FLAGS.epochs):
             adj_fc = adj_fc_data[:, i*FLAGS.windows_size:(i+1)*FLAGS.windows_size]
             features_sc = features_sc_sub
             features_fc = features_fc_data[:, i*FLAGS.windows_size:(i+1)*FLAGS.windows_size]
+            labels_feature = labels_feature_data[:, i * FLAGS.windows_size:(i + 1) * FLAGS.windows_size][:, 0, :, 0]
             adj_fc_pre = adj_fc_pre_data[:, i * FLAGS.windows_size:(i + 1) * FLAGS.windows_size]
             adj_label = ydata[:, i*FLAGS.windows_size:(i+1)*FLAGS.windows_size]
 
             # Construct feed dictionary
-            feed_dict = construct_feed_dict(adj_sc, adj_fc, adj_label[:, 0], features_sc, features_fc, adj_fc_pre, placeholders)
+            feed_dict = construct_feed_dict(adj_sc, adj_fc, adj_label[:, 0], features_sc, features_fc, adj_fc_pre, labels_feature, placeholders)
             feed_dict.update({placeholders['dropout']: FLAGS.dropout})
             #feed_dict.update({real_graph: np.reshape(adj_label[:, 0], [FLAGS.batch_size, -1])})
 
@@ -323,17 +345,19 @@ for epoch in range(FLAGS.epochs):
             #_, D_loss_curr = sess.run([D_opt, D_loss], feed_dict=feed_dict)
             #outs = sess.run([model.opt_op, model.loss, model.outputs, model.labels], feed_dict=feed_dict)
             outs_d = sess.run([lstmGAN.D_solver, lstmGAN.D_loss], feed_dict=feed_dict)
-            outs_g = sess.run([lstmGAN.G_solver, lstmGAN.G_loss, lstmGAN.mse], feed_dict=feed_dict)
+            outs_g = sess.run([lstmGAN.G_solver, lstmGAN.G_loss, lstmGAN.mse, lstmGAN.label_feature_sub, lstmGAN.pred_feature_sub], feed_dict=feed_dict)
 
 
             # Compute average loss
             avg_d_loss_iter = avg_d_loss_iter + outs_d[1]
             avg_g_loss_iter = avg_g_loss_iter + outs_g[1]
             avg_mse_loss_iter = avg_mse_loss_iter + outs_g[2]
-            # print(outs[4])
-            # print(outs[3])
-            # print(outs[2])
-            # print("+++++++++++++++++++++++")
+            # print(outs_g[3]-outs_g[4])
+            # print('---------------')
+            # print(outs_g[4])
+            # print('++++++++++++++++')
+            # print(outs_g[3])
+            # print('******************')
         avg_d_loss = avg_d_loss + avg_d_loss_iter/iterations
         avg_g_loss = avg_g_loss + avg_g_loss_iter/iterations
         avg_mse_loss = avg_mse_loss + avg_mse_loss_iter/iterations

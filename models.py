@@ -90,6 +90,7 @@ class Generator(Model):
         self.adj_fc = placeholders['adj_fc']
         self.dropout = placeholders['dropout']
         self.labels = placeholders['labels']
+        self.labels_feature = placeholders['labels_feature']
 
         self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)
 
@@ -125,6 +126,8 @@ class Generator(Model):
         #                                                    [FLAGS.batch_size, FLAGS.windows_size, -1])], 2)
         # self.hidden2.set_shape([FLAGS.batch_size, FLAGS.windows_size, self.node_num*(FLAGS.hidden2+self.node_num)])
         self.lstm, _ = InnerProductLSTM(units=self.node_num*FLAGS.hidden3)(self.hidden2)
+        self.pred_feature = slim.fully_connected(self.lstm, self.node_num*FLAGS.remove_length, activation_fn=tf.nn.sigmoid)
+        self.pred_feature = tf.reshape(self.pred_feature, [FLAGS.batch_size, self.node_num, FLAGS.remove_length])
         self.lstm = tf.reshape(self.lstm, [FLAGS.batch_size, self.node_num, FLAGS.hidden3])
         self.adj_sc = tf.tile(self.adj_sc, [FLAGS.batch_size, 1])
         self.adj_sc = tf.reshape(self.adj_sc, [FLAGS.batch_size, self.node_num, self.node_num])
@@ -170,7 +173,7 @@ class Generator(Model):
         self.mse = tf.losses.mean_squared_error(preds_sub, labels_sub)
 
     def predict(self):
-        return self.outputs
+        return self.outputs, self.pred_feature
 
 
 class Discriminator_old(Model):
@@ -286,11 +289,12 @@ class lstmGAN():
         self.adj_fc = placeholders['adj_fc']
         self.dropout = placeholders['dropout']
         self.labels = placeholders['labels']
+        self.labels_feature = placeholders['labels_feature']
         self.generator = generator
         self.discriminator = discriminator
         self.X = tf.reshape(self.labels, [FLAGS.batch_size, self.node_num*self.node_num])
 
-        self.G_sample = self.generator(placeholders, num_features, features_nonzero, num_node)
+        self.G_sample, self.G_feature = self.generator(placeholders, num_features, features_nonzero, num_node)
         self.D_fake = self.discriminator(placeholders, self.G_sample, num_node, num_features)
         self.D_real = self.discriminator(placeholders, self.X, num_node, num_features)
 
@@ -311,10 +315,16 @@ class lstmGAN():
         #self.G_loss = -tf.reduce_mean(tf.log(self.D_fake))
         preds_sub = tf.reshape(self.G_sample, [FLAGS.batch_size, 90*90])
         labels_sub = tf.reshape(self.labels, [FLAGS.batch_size, 90*90])
+        self.pred_feature_sub = tf.reshape(self.G_feature, [FLAGS.batch_size, self.node_num*FLAGS.remove_length])
+        self.label_feature_sub = tf.reshape(self.labels_feature, [FLAGS.batch_size, self.node_num*FLAGS.remove_length])
+
 
         #pre_sub = tf.reshape(self.adj_fc[:, 7], [FLAGS.batch_size, 90*90])
+        lamda = 3
         self.Pre_loss = tf.reduce_mean(tf.losses.huber_loss(preds_sub, labels_sub))
         self.mse = tf.reduce_mean(tf.losses.mean_squared_error(preds_sub, labels_sub))
+        self.feature_mse = tf.reduce_mean(tf.losses.mean_squared_error(self.pred_feature_sub, self.label_feature_sub))
+        self.total_Pre_loss = self.Pre_loss + lamda*self.feature_mse
         self.correct_prediction = tf.equal(tf.cast(tf.greater_equal(preds_sub, 0.5), tf.int32),
                                            tf.cast(labels_sub, tf.int32))
         #self.accuracy = tf.reduce_mean(tf.cast(self.correct_prediction, tf.float32))
@@ -340,4 +350,6 @@ class lstmGAN():
         self.D_solver = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate, beta1=0., beta2=0.9).minimize(self.D_loss, var_list=self.discriminator.vars)
         self.G_solver = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate, beta1=0., beta2=0.9).minimize(self.G_loss, var_list=self.generator.vars)
         self.Pre_solver = tf.train.AdamOptimizer(learning_rate=FLAGS.pre_learning_rate).minimize(self.Pre_loss, var_list=self.generator.vars)
+        self.Pre_feature_solver = tf.train.AdamOptimizer(learning_rate=FLAGS.pre_learning_rate).minimize(self.feature_mse, var_list=self.generator.vars)
+        self.Total_Pre_solver = tf.train.AdamOptimizer(learning_rate=FLAGS.pre_learning_rate).minimize(self.total_Pre_loss, var_list=self.generator.vars)
 

@@ -20,7 +20,7 @@ def preprocess_graph(adj):
     return adj_normalized.todense()
 
 
-def construct_feed_dict(adj_sc, adj_fc, labels, sc_features, fc_features, adj_fc_pre, placeholders):
+def construct_feed_dict(adj_sc, adj_fc, labels, sc_features, fc_features, adj_fc_pre, labels_feature, placeholders):
     # construct feed dictionary
     feed_dict = dict()
     feed_dict.update({placeholders['sc_features']: sc_features})
@@ -29,6 +29,7 @@ def construct_feed_dict(adj_sc, adj_fc, labels, sc_features, fc_features, adj_fc
     feed_dict.update({placeholders['adj_fc']: adj_fc})
     feed_dict.update({placeholders['labels']: labels})
     feed_dict.update({placeholders['adj_fc_pre']: adj_fc_pre})
+    feed_dict.update({placeholders['labels_feature']: labels_feature})
     return feed_dict
 
 

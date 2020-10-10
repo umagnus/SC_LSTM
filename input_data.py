@@ -6,7 +6,10 @@ import scipy.sparse as sp
 import os
 from scipy import io
 from paramaters import FLAGS
+import seaborn as sns
+import matplotlib.pyplot as plt
 import preprocessing
+from sklearn import preprocessing
 
 
 def parse_index_file(filename):
@@ -85,16 +88,19 @@ def loadFSData(SC_path, FC_path):
     time_length = 1200
     window_length = FLAGS.window_length
     node_number = 90
-    threshold = 0.9
+    threshold = 0.8
     window_number = time_length - window_length
     for FCfiles in FC_list:
         subj_dir = os.path.join(FC_path, FCfiles, FC_dir)
         subj_data = io.loadmat(subj_dir)
         print("reading data " + subj_dir)
         subj_mat_fc = subj_data['RS_Regressed']
+        subj_mat_fc_list = subj_mat_fc.reshape((-1))
+        subj_mat_fc_new = (subj_mat_fc-min(subj_mat_fc_list))/(max(subj_mat_fc_list)-min(subj_mat_fc_list))
+        # subj_mat_fc_new = preprocessing.scale(subj_mat_fc)
         i_Features = np.arange(window_number*node_number*window_length).reshape((window_number, node_number, window_length)).astype('float32')
         i_adj = np.arange(window_number*node_number*node_number).reshape((window_number, node_number, node_number)).astype('float32')
-        for w in range(0, window_number):
+        for w in range(0, window_number, FLAGS.remove_length):
             w_start = w
             w_end = w_start + window_length
             w_series = np.transpose(subj_mat_fc[w_start:w_end, :])
@@ -103,11 +109,12 @@ def loadFSData(SC_path, FC_path):
             edgeWeight_list = w_edgeWeight.reshape((-1))
             thindex = int(threshold * edgeWeight_list.shape[0])
             thremax = edgeWeight_list[edgeWeight_list.argsort()[-1*thindex]]
-            w_edgeWeight = (w_edgeWeight-min(edgeWeight_list))/(1-min(edgeWeight_list))
+            w_edgeWeight[w_edgeWeight < 0] = 0
+            # w_edgeWeight = (w_edgeWeight-min(edgeWeight_list))/(1-min(edgeWeight_list))
             # w_edgeWeight[w_edgeWeight >= thremax] = 1
             # w_edgeWeight[w_edgeWeight < thremax] = 0
             i_adj[w, :, :] = w_edgeWeight
-            i_Features[w, :, :] = w_series
+            i_Features[w, :, :] = np.transpose(subj_mat_fc_new[w_start:w_end, :])
         fc_adj.append(i_adj)
         fc_features.append(i_Features)
     return feature, adj, fc_adj, fc_features
