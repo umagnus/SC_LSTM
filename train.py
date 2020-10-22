@@ -20,16 +20,17 @@ from sklearn.metrics import average_precision_score
 
 from optimizer import OptimizerED
 from input_data import loadFSData
-from models import Generator, Discriminator, lstmGAN
+from models import Generator, Discriminator, lstmGAN, Generator_new
 from preprocessing import preprocess_graph, construct_feed_dict, construct_feed_dict_discriminator, sparse_to_tuple, mask_test_edges
 from paramaters import FLAGS
+from matplotlib.pyplot import savefig
 
 np.set_printoptions(suppress=True)
 model_str = FLAGS.model
 dataset_str = FLAGS.dataset
 
 # Load data
-sc_features, sc_adj, fc_adj, fc_features = loadFSData("H:\Data\dMRI", "H:\Data\REST1")
+sc_features, sc_adj, fc_adj, fc_features = loadFSData("G:\Data\SC_LSTM test\dMRI", "G:\Data\SC_LSTM test\REST1")
 fc_adj_pre = copy.deepcopy(fc_adj)
 for i in range(len(fc_adj)):
     for j in range(len(fc_adj[i])):
@@ -69,17 +70,17 @@ ax = fig0.add_axes([0.2, 0.07, 0.6, 0.9], facecolor='white')
 cbar_ax = fig0.add_axes([0.85, 0.07, 0.05, 0.88])
 
 
-def draw_graph(label_graph, pred_graph, batch, epochs, test_i):
+def draw_graph(label_graph, pred_graph, batch, epochs, test_i, test_sub):
     fig_label = sns.heatmap(np.reshape(label_graph[batch], (90, 90)), ax=ax, cbar_ax=cbar_ax,
                             cmap='YlGnBu', vmin=0, vmax=1)
     heatmap_label = fig_label.get_figure()
-    heatmap_label.savefig('./heatmap_new_2/' + 'iter=' + str(test_i) + '_batch=' + str(batch) +
+    heatmap_label.savefig('./heatmap_new_2/' + 'index=' + str(test_sub) + 'iter=' + str(test_i) + '_batch=' + str(batch) +
                           'label_GAN_gcn_lstm_pre_train_' + str(FLAGS.pre_epochs) + '_train_' + str(
         epochs) + '.jpg', dpi=400)
     fig_pred = sns.heatmap(np.reshape(pred_graph[batch], (90, 90)), ax=ax, cbar_ax=cbar_ax,
                            cmap='YlGnBu', vmin=0, vmax=1)
     heatmap_pred = fig_pred.get_figure()
-    heatmap_pred.savefig('./heatmap_new_2/' + 'iter=' + str(test_i) + '_batch=' + str(batch) +
+    heatmap_pred.savefig('./heatmap_new_2/' + 'index=' + str(test_sub) + 'iter=' + str(test_i) + '_batch=' + str(batch) +
                          'pred_GAN_gcn_lstm_pre_train_' + str(FLAGS.pre_epochs) + '_train_' + str(
         epochs) + '.jpg', dpi=400)
     del fig_label
@@ -106,49 +107,78 @@ def test_epoch(test_sess, epochs):
         test_features_sc_sub = sc_features[test_sub]
         test_features_fc_sub = fc_features[test_sub]
 
-        test_iterations = test_adj_fc_sub.shape[0] // (FLAGS.batch_size * FLAGS.windows_size) - 1
+        test_iterations = test_adj_fc_sub.shape[0]//FLAGS.batch_size - FLAGS.windows_size
         test_train_it = []
         test_test_it = []
-        for i in range(test_iterations):
-            if i < int(test_iterations * 0.8):
-                test_train_it.append(i)
+        for test_i in range(test_iterations):
+            if test_i < int(test_iterations*0.8):
+                test_train_it.append(test_i)
             else:
-                test_test_it.append(i)
-        test_round_data_len = test_iterations * FLAGS.batch_size * FLAGS.windows_size
-        test_adj_fc_data = test_adj_fc_sub[:test_round_data_len].reshape(FLAGS.batch_size, test_iterations * FLAGS.windows_size,
-                                                                         node_number, -1)
-        test_features_fc_data = test_features_fc_sub[:test_round_data_len].reshape(FLAGS.batch_size, test_iterations * FLAGS.windows_size,
-                                                                                   node_number, -1)
-        test_labels_feature_data = test_features_fc_sub[FLAGS.windows_size:test_round_data_len + FLAGS.windows_size].reshape(FLAGS.batch_size,
-                                                                                                             test_iterations * FLAGS.windows_size,
-                                                                                                             node_number, -1)
-        test_adj_fc_pre_data = test_adj_label_sub[:test_round_data_len].reshape(FLAGS.batch_size, test_iterations * FLAGS.windows_size,
-                                                                                node_number, -1)
-        test_ydata = test_adj_label_sub[FLAGS.windows_size:test_round_data_len + FLAGS.windows_size].reshape(FLAGS.batch_size,
-                                                                                                             test_iterations * FLAGS.windows_size,
-                                                                                                             node_number, -1)
+                test_test_it.append(test_i)
+        test_round_data_len = test_iterations*FLAGS.batch_size
+        test_adj_fc_data = []
+        test_features_fc_data = []
+        test_labels_feature_data = []
+        test_adj_fc_pre_data = []
+        test_ydata = []
+        for test_i in range(test_round_data_len):
+            test_adj_fc_data.append(test_adj_fc_sub[test_i:test_i+FLAGS.windows_size])
+            test_features_fc_data.append(test_features_fc_sub[test_i:test_i+FLAGS.windows_size])
+            test_labels_feature_data.append(test_features_fc_sub[test_i+FLAGS.windows_size])
+            test_adj_fc_pre_data.append(test_adj_label_sub[test_i:test_i+FLAGS.windows_size])
+            test_ydata.append(test_adj_label_sub[test_i+FLAGS.windows_size])
+        test_adj_fc_data = np.array(test_adj_fc_data).reshape([FLAGS.batch_size, test_iterations*FLAGS.windows_size, node_number, -1])
+        test_features_fc_data = np.array(test_features_fc_data).reshape([FLAGS.batch_size, test_iterations*FLAGS.windows_size, node_number, -1])
+        test_labels_feature_data = np.array(test_labels_feature_data).reshape([FLAGS.batch_size, test_iterations, node_number, -1])
+        test_adj_fc_pre_data = np.array(test_adj_fc_pre_data).reshape([FLAGS.batch_size, test_iterations*FLAGS.windows_size, node_number, -1])
+        test_ydata = np.array(test_ydata).reshape([FLAGS.batch_size, test_iterations, node_number, -1])
+
+        # test_iterations = test_adj_fc_sub.shape[0] // (FLAGS.batch_size * FLAGS.windows_size) - 1
+        # test_train_it = []
+        # test_test_it = []
+        # for test_i in range(test_iterations):
+        #     if test_i < int(test_iterations * 0.8):
+        #         test_train_it.append(test_i)
+        #     else:
+        #         test_test_it.append(test_i)
+        # test_round_data_len = test_iterations * FLAGS.batch_size * FLAGS.windows_size
+        # test_adj_fc_data = test_adj_fc_sub[:test_round_data_len].reshape(FLAGS.batch_size, test_iterations * FLAGS.windows_size,
+        #                                                                  node_number, -1)
+        # test_features_fc_data = test_features_fc_sub[:test_round_data_len].reshape(FLAGS.batch_size, test_iterations * FLAGS.windows_size,
+        #                                                                            node_number, -1)
+        # test_labels_feature_data = test_features_fc_sub[FLAGS.windows_size:test_round_data_len + FLAGS.windows_size].reshape(FLAGS.batch_size,
+        #                                                                                                      test_iterations * FLAGS.windows_size,
+        #                                                                                                      node_number, -1)
+        # test_adj_fc_pre_data = test_adj_label_sub[:test_round_data_len].reshape(FLAGS.batch_size, test_iterations * FLAGS.windows_size,
+        #                                                                         node_number, -1)
+        # test_ydata = test_adj_label_sub[FLAGS.windows_size:test_round_data_len + FLAGS.windows_size].reshape(FLAGS.batch_size,
+        #                                                                                                      test_iterations * FLAGS.windows_size,
+        #                                                                                                      node_number, -1)
         test_cost_iter = 0
         test_acc_iter = 0
         test_rec_iter = 0
         test_pre_iter = 0
         hm_graph_iter = np.zeros(8100)
-        test_adj_fc = test_adj_fc_data[:, test_test_it[0] * FLAGS.windows_size:(test_test_it[0] + 1) * FLAGS.windows_size]
-        test_features_fc = test_features_fc_data[:, test_test_it[0] * FLAGS.windows_size:(test_test_it[0] + 1) * FLAGS.windows_size]
+        # test_adj_fc = test_adj_fc_data[:, test_test_it[0] * FLAGS.windows_size:(test_test_it[0] + 1) * FLAGS.windows_size]
+        # test_features_fc = test_features_fc_data[:, test_test_it[0] * FLAGS.windows_size:(test_test_it[0] + 1) * FLAGS.windows_size]
+        time_series = []
         for test_i in test_test_it:
             test_adj_sc = test_adj_sc_sub
-            # test_adj_fc = test_adj_fc_data[:, test_i * FLAGS.windows_size:(test_i + 1) * FLAGS.windows_size]
+            test_adj_fc = test_adj_fc_data[:, test_i * FLAGS.windows_size:(test_i + 1) * FLAGS.windows_size]
             test_features_sc = test_features_sc_sub
-            # test_features_fc = test_features_fc_data[:, test_i * FLAGS.windows_size:(test_i + 1) * FLAGS.windows_size]
-            test_labels_feature = test_labels_feature_data[:, test_i * FLAGS.windows_size:(test_i + 1) * FLAGS.windows_size][:, 0, :, 0]
+            test_features_fc = test_features_fc_data[:, test_i * FLAGS.windows_size:(test_i + 1) * FLAGS.windows_size]
+            test_labels_feature = test_labels_feature_data[:, test_i][:, :, 0]
             test_adj_fc_pre = test_adj_fc_pre_data[:, test_i * FLAGS.windows_size:(test_i + 1) * FLAGS.windows_size]
-            test_adj_label = test_ydata[:, test_i * FLAGS.windows_size:(test_i + 1) * FLAGS.windows_size]
+            test_adj_label = test_ydata[:, test_i]
 
             # Construct feed dictionary
-            test_feed_dict = construct_feed_dict(test_adj_sc, test_adj_fc, test_adj_label[:, 0], test_features_sc,
+            test_feed_dict = construct_feed_dict(test_adj_sc, test_adj_fc, test_adj_label, test_features_sc,
                                                  test_features_fc, test_adj_fc_pre, test_labels_feature, placeholders)
             # Run single weight update
             test_outs = test_sess.run([lstmGAN.mse, lstmGAN.G_sample, lstmGAN.feature_mse, lstmGAN.total_Pre_loss, lstmGAN.precision, lstmGAN.labels_feature], feed_dict=test_feed_dict)
-
+            value_outs = test_sess.run([lstmGAN.abs_value, lstmGAN.avg_preds, lstmGAN.avg_labels], feed_dict=test_feed_dict)
+            # print(value_outs[0], value_outs[1], value_outs[2])
+            # print("++++++++++")
             # Compute average loss
             test_cost_iter = test_cost_iter + test_outs[0]
             test_acc_iter = test_acc_iter + test_outs[2]
@@ -157,23 +187,33 @@ def test_epoch(test_sess, epochs):
             # print(adj_label[:, 0].reshape((FLAGS.batch_size, 8100)))
             # print(outs[1])
             # print("++++++++++++++++++++++++")
-            test_adj_fc = np.concatenate((test_adj_fc, test_outs[1].reshape((FLAGS.batch_size, FLAGS.remove_length, 90, 90))), axis=1)
-            test_adj_fc = test_adj_fc[:, 1:, :]
-            nxt_feature = np.concatenate((test_features_fc[:, -1, :, 1:], test_outs[5].reshape((FLAGS.batch_size, 90, FLAGS.remove_length))), axis=2)
-            nxt_feature = nxt_feature.reshape((FLAGS.batch_size, 1, 90, FLAGS.window_length))
-            test_features_fc = np.concatenate((test_features_fc[:, 1:, :], nxt_feature), axis=1)
-            hm_graph_iter = hm_graph_iter + np.sum(abs(test_adj_label[:, 0].reshape((FLAGS.batch_size, 8100)) - test_outs[1]),
+            # test_adj_fc = np.concatenate((test_adj_fc, test_outs[1].reshape((FLAGS.batch_size, FLAGS.remove_length, 90, 90))), axis=1)
+            # test_adj_fc = test_adj_fc[:, 1:, :]
+            # nxt_feature = np.concatenate((test_features_fc[:, -1, :, 1:], test_outs[5].reshape((FLAGS.batch_size, 90, FLAGS.remove_length))), axis=2)
+            # nxt_feature = nxt_feature.reshape((FLAGS.batch_size, 1, 90, FLAGS.window_length))
+            # test_features_fc = np.concatenate((test_features_fc[:, 1:, :], nxt_feature), axis=1)
+            hm_graph_iter = hm_graph_iter + np.sum(abs(test_adj_label.reshape((FLAGS.batch_size, 8100)) - test_outs[1]),
                                                    axis=0) / FLAGS.batch_size
-            label_graph = test_adj_label[:, 0].reshape((FLAGS.batch_size, 8100))
+            label_graph = test_adj_label.reshape((FLAGS.batch_size, 8100))
+            #
+            # label_graph = np.corrcoef(test_features_fc[0, -1].reshape((node_number, FLAGS.window_length)))
+            # for test_batch in range(test_features_fc.shape[0]-1):
+            #     label_graph = np.concatenate((label_graph, np.corrcoef(test_features_fc[test_batch+1, -1].reshape((node_number, FLAGS.window_length)))), axis=0)
+            # label_graph = label_graph.reshape((FLAGS.batch_size, 8100))
+            # label_graph[label_graph < 0] = 0
             pred_graph = test_outs[1]
             # for batch in range(FLAGS.batch_size):
-            draw_graph(label_graph, pred_graph, 0, epochs, test_i)
+            draw_graph(label_graph, pred_graph, 0, epochs, test_i, test_sub)
+            time_series.append(test_outs[0])
 
-        test_cost = test_cost + test_cost_iter / test_iterations
-        test_acc = test_acc + test_acc_iter / test_iterations
-        test_rec = test_rec + test_rec_iter / test_iterations
-        test_pre = test_pre + test_pre_iter / test_iterations
-        hm_graph = hm_graph + hm_graph_iter / test_iterations
+        test_cost = test_cost + test_cost_iter / len(test_test_it)
+        test_acc = test_acc + test_acc_iter / len(test_test_it)
+        test_rec = test_rec + test_rec_iter / len(test_test_it)
+        test_pre = test_pre + test_pre_iter / len(test_test_it)
+        hm_graph = hm_graph + hm_graph_iter / len(test_test_it)
+        plt.figure()
+        fig = plt.plot(test_test_it, time_series)
+        savefig('index=' + str(test_sub))
 
     print("Test cost mse: " + str(test_cost / len(test_index)))
     print("Test cost feature_mse: " + str(test_acc / len(test_index)))
@@ -192,7 +232,7 @@ def test_epoch(test_sess, epochs):
     # plt.show()
 
 # Create model
-generator = Generator()
+generator = Generator_new()
 discriminator = Discriminator()
 lstmGAN = lstmGAN(placeholders, window_length, features_nonzero, node_number, generator, discriminator)
 
@@ -222,7 +262,7 @@ for epoch in range(FLAGS.pre_epochs):
         features_sc_sub = sc_features[sub]
         features_fc_sub = fc_features[sub]
 
-        iterations = adj_fc_sub.shape[0]//(FLAGS.batch_size*FLAGS.windows_size)-1
+        iterations = adj_fc_sub.shape[0]//FLAGS.batch_size - FLAGS.windows_size
         train_it = []
         test_it = []
         for i in range(iterations):
@@ -230,13 +270,40 @@ for epoch in range(FLAGS.pre_epochs):
                 train_it.append(i)
             else:
                 test_it.append(i)
-        round_data_len = iterations * FLAGS.batch_size * FLAGS.windows_size
-        adj_fc_data = adj_fc_sub[:round_data_len].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
-        features_fc_data = features_fc_sub[:round_data_len].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
-        labels_feature_data = features_fc_sub[FLAGS.windows_size:round_data_len + FLAGS.windows_size].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
-        adj_fc_pre_data = adj_label_sub[:round_data_len].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size,
-                                                                                node_number, -1)
-        ydata = adj_label_sub[FLAGS.windows_size:round_data_len + FLAGS.windows_size].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
+        round_data_len = iterations*FLAGS.batch_size
+        adj_fc_data = []
+        features_fc_data = []
+        labels_feature_data = []
+        adj_fc_pre_data = []
+        ydata = []
+        for i in range(round_data_len):
+            adj_fc_data.append(adj_fc_sub[i:i+FLAGS.windows_size])
+            features_fc_data.append(features_fc_sub[i:i+FLAGS.windows_size])
+            labels_feature_data.append(features_fc_sub[i+FLAGS.windows_size])
+            adj_fc_pre_data.append(adj_label_sub[i:i+FLAGS.windows_size])
+            ydata.append(adj_label_sub[i+FLAGS.windows_size])
+        adj_fc_data = np.array(adj_fc_data).reshape([FLAGS.batch_size, iterations*FLAGS.windows_size, node_number, -1])
+        features_fc_data = np.array(features_fc_data).reshape([FLAGS.batch_size, iterations*FLAGS.windows_size, node_number, -1])
+        labels_feature_data = np.array(labels_feature_data).reshape([FLAGS.batch_size, iterations, node_number, -1])
+        adj_fc_pre_data = np.array(adj_fc_pre_data).reshape([FLAGS.batch_size, iterations*FLAGS.windows_size, node_number, -1])
+        ydata = np.array(ydata).reshape([FLAGS.batch_size, iterations, node_number, -1])
+
+
+        # iterations = adj_fc_sub.shape[0]//(FLAGS.batch_size*FLAGS.windows_size)-1
+        # train_it = []
+        # test_it = []
+        # for i in range(iterations):
+        #     if i < int(iterations*0.8):
+        #         train_it.append(i)
+        #     else:
+        #         test_it.append(i)
+        # round_data_len = iterations * FLAGS.batch_size * FLAGS.windows_size
+        # adj_fc_data = adj_fc_sub[:round_data_len].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
+        # features_fc_data = features_fc_sub[:round_data_len].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
+        # labels_feature_data = features_fc_sub[FLAGS.windows_size:round_data_len + FLAGS.windows_size].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
+        # adj_fc_pre_data = adj_label_sub[:round_data_len].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size,
+        #                                                                         node_number, -1)
+        # ydata = adj_label_sub[FLAGS.windows_size:round_data_len + FLAGS.windows_size].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
 
         avg_pre_loss_iter = 0
         avg_pre_acc_iter = 0
@@ -247,18 +314,27 @@ for epoch in range(FLAGS.pre_epochs):
             adj_fc = adj_fc_data[:, i*FLAGS.windows_size:(i+1)*FLAGS.windows_size]
             features_sc = features_sc_sub
             features_fc = features_fc_data[:, i*FLAGS.windows_size:(i+1)*FLAGS.windows_size]
-            labels_feature = labels_feature_data[:, i * FLAGS.windows_size:(i + 1) * FLAGS.windows_size][:, 0, :, 0]
+            labels_feature = labels_feature_data[:, i][:, :, 0]
             adj_fc_pre = adj_fc_pre_data[:, i * FLAGS.windows_size:(i + 1) * FLAGS.windows_size]
-            adj_label = ydata[:, i*FLAGS.windows_size:(i+1)*FLAGS.windows_size]
+            adj_label = ydata[:, i]
+
+
+            # fig0 = plt.figure(figsize=(6, 4))
+            # ax = fig0.add_axes([0.2, 0.07, 0.6, 0.9], facecolor='white')
+            # cbar_ax = fig0.add_axes([0.85, 0.07, 0.05, 0.88])
+            # fig_pred = sns.heatmap(np.reshape(adj_label[0, 0], (90, 90)), ax=ax, cbar_ax=cbar_ax,
+            #                        cmap='YlGnBu', vmin=0, vmax=1)
+            # heatmap_pred = fig_pred.get_figure()
+            # heatmap_pred.savefig('./heatmap_new_2/' + 'train_it=' + str(i) + '.jpg', dpi=400)
 
             # Construct feed dictionary
-            feed_dict = construct_feed_dict(adj_sc, adj_fc, adj_label[:, 0], features_sc, features_fc, adj_fc_pre, labels_feature, placeholders)
+            feed_dict = construct_feed_dict(adj_sc, adj_fc, adj_label, features_sc, features_fc, adj_fc_pre, labels_feature, placeholders)
             feed_dict.update({placeholders['dropout']: FLAGS.dropout})
 
             # Run single weight update
-            outs_adj = sess.run([lstmGAN.Pre_solver], feed_dict=feed_dict)
+            # outs_adj = sess.run([lstmGAN.Pre_solver], feed_dict=feed_dict)
             outs_feature = sess.run([lstmGAN.Pre_feature_solver], feed_dict=feed_dict)
-            outs = sess.run([lstmGAN.Total_Pre_solver, lstmGAN.Pre_loss, lstmGAN.feature_mse, lstmGAN.total_Pre_loss, lstmGAN.precision, lstmGAN.pred_feature_sub, lstmGAN.label_feature_sub], feed_dict=feed_dict)
+            outs = sess.run([lstmGAN.Pre_solver, lstmGAN.Pre_loss, lstmGAN.feature_mse, lstmGAN.total_Pre_loss, lstmGAN.precision, lstmGAN.pred_feature_sub, lstmGAN.label_feature_sub], feed_dict=feed_dict)
 
             # Compute average loss
             avg_pre_loss_iter = avg_pre_loss_iter + outs[1]
@@ -270,10 +346,11 @@ for epoch in range(FLAGS.pre_epochs):
             # print("-----------------------")
             # print(outs[6])
             # print("+++++++++++++++++++++++")
-        avg_pre_loss = avg_pre_loss + avg_pre_loss_iter/iterations
-        avg_pre_acc = avg_pre_acc + avg_pre_acc_iter/iterations
-        avg_pre_rec = avg_pre_rec + avg_pre_rec_iter/iterations
-        avg_pre_pre = avg_pre_pre + avg_pre_pre_iter/iterations
+        avg_pre_loss = avg_pre_loss + avg_pre_loss_iter/len(train_it)
+        avg_pre_acc = avg_pre_acc + avg_pre_acc_iter/len(train_it)
+        avg_pre_rec = avg_pre_rec + avg_pre_rec_iter/len(train_it)
+        avg_pre_pre = avg_pre_pre + avg_pre_pre_iter/len(train_it)
+    sess.run([lstmGAN.add_global])
     avg_pre_loss = avg_pre_loss/len(train_index)
     avg_pre_acc = avg_pre_acc/len(train_index)
     avg_pre_rec = avg_pre_rec/len(train_index)

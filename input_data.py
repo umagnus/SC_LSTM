@@ -115,6 +115,15 @@ def loadFSData(SC_path, FC_path):
             # w_edgeWeight[w_edgeWeight < thremax] = 0
             i_adj[w, :, :] = w_edgeWeight
             i_Features[w, :, :] = np.transpose(subj_mat_fc_new[w_start:w_end, :])
+
+            # if w % 40 == 0:
+            #     fig0 = plt.figure(figsize=(6, 4))
+            #     ax = fig0.add_axes([0.2, 0.07, 0.6, 0.9], facecolor='white')
+            #     cbar_ax = fig0.add_axes([0.85, 0.07, 0.05, 0.88])
+            #     fig_pred = sns.heatmap(np.reshape(w_edgeWeight, (90, 90)), ax=ax, cbar_ax=cbar_ax,
+            #                        cmap='YlGnBu')
+            #     heatmap_pred = fig_pred.get_figure()
+            #     heatmap_pred.savefig('./heatmap_new_2/' + FCfiles+  'w=' + str(w) + '.jpg', dpi=400)
         fc_adj.append(i_adj)
         fc_features.append(i_Features)
     return feature, adj, fc_adj, fc_features

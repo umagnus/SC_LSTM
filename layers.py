@@ -1,5 +1,6 @@
 from inits import *
 import tensorflow as tf
+import tensorflow.contrib.slim as slim
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
@@ -188,31 +189,26 @@ class InnerProductLSTM(Layer):
         self.units = units
 
     def _call(self, inputs):
-        cell = tf.nn.rnn_cell.LSTMCell(num_units=self.units, activation=self.act)
-        self.current_V, (c, h) = tf.nn.dynamic_rnn(cell=cell,
-                                                   inputs=inputs,
-                                                   dtype=tf.float32,
-                                                   time_major=False)
-        outputs = tf.reshape(h, [-1, self.units])
-        c_outputs = tf.reshape(c, [-1, self.units])
-        return outputs, c_outputs
+        with tf.variable_scope(self.name, default_name='lstm') as scope:
+            cell = tf.nn.rnn_cell.LSTMCell(num_units=self.units, activation=self.act)
+            self.current_V, (c, h) = tf.nn.dynamic_rnn(cell=cell,
+                                                       inputs=inputs,
+                                                       dtype=tf.float32,
+                                                       time_major=False)
+            outputs = tf.reshape(h, [-1, self.units])
+            c_outputs = tf.reshape(c, [-1, self.units])
+            return outputs, c_outputs
 
 
 class InnerProduceDense(Layer):
-    def __init__(self, input_dim, units, batch_size, dropout=0., act=tf.nn.sigmoid, **kwargs):
+    def __init__(self, units, dropout=0., act=tf.nn.sigmoid, **kwargs):
         super(InnerProduceDense, self).__init__(**kwargs)
-        with tf.variable_scope(self.name + '_vars'):
-            self.vars['weights'] = weight_variable_glorot(input_dim, units, name="ipd_weights")
-            self.vars['bias'] = tf.Variable(tf.zeros(shape=[units]), name="ipd_bias")
         self.units = units
         self.dropout = dropout
-        self.input_dim = input_dim
-        self.batch_size = batch_size
         self.act = act
 
     def _call(self, inputs):
-        dense = tf.matmul(inputs, self.vars['weights'])+self.vars['bias']
-        dropout = tf.nn.dropout(dense, 1-self.dropout)
-        output = self.act(dropout)
-        return output
+        with tf.variable_scope(self.name, default_name='dense', reuse=tf.AUTO_REUSE) as scope:
+            output = slim.fully_connected(inputs, self.units, self.act)
+            return output
 
