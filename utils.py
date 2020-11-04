@@ -4,6 +4,11 @@ import networkx as nx
 import scipy.sparse as sp
 from scipy.sparse.linalg.eigen.arpack import eigsh
 import sys
+import seaborn as sns
+from paramaters import FLAGS
+import gc
+from preprocessing import construct_feed_dict
+import tensorflow as tf
 
 
 def parse_index_file(filename):
@@ -135,15 +140,15 @@ def preprocess_adj(adj):
     return sparse_to_tuple(adj_normalized)
 
 
-def construct_feed_dict(features, support, labels, labels_mask, placeholders):
-    """Construct feed dictionary."""
-    feed_dict = dict()
-    feed_dict.update({placeholders['labels']: labels})
-    feed_dict.update({placeholders['labels_mask']: labels_mask})
-    feed_dict.update({placeholders['features']: features})
-    feed_dict.update({placeholders['support'][i]: support[i] for i in range(len(support))})
-    feed_dict.update({placeholders['num_features_nonzero']: features[1].shape})
-    return feed_dict
+# def construct_feed_dict(features, support, labels, labels_mask, placeholders):
+#     """Construct feed dictionary."""
+#     feed_dict = dict()
+#     feed_dict.update({placeholders['labels']: labels})
+#     feed_dict.update({placeholders['labels_mask']: labels_mask})
+#     feed_dict.update({placeholders['features']: features})
+#     feed_dict.update({placeholders['support'][i]: support[i] for i in range(len(support))})
+#     feed_dict.update({placeholders['num_features_nonzero']: features[1].shape})
+#     return feed_dict
 
 
 def chebyshev_polynomials(adj, k):
@@ -167,3 +172,75 @@ def chebyshev_polynomials(adj, k):
         t_k.append(chebyshev_recurrence(t_k[-1], t_k[-2], scaled_laplacian))
 
     return sparse_to_tuple(t_k)
+
+
+def draw_graph(label_graph, pred_graph, batch, epochs, test_i, test_sub, ax, cbar_ax):
+    fig_label = sns.heatmap(np.reshape(label_graph[batch], (90, 90)), ax=ax, cbar_ax=cbar_ax,
+                            cmap='YlGnBu', vmin=0, vmax=1)
+    heatmap_label = fig_label.get_figure()
+    heatmap_label.savefig('./heatmap_new_3/' + 'index=' + str(test_sub) + 'iter=' + str(test_i) + '_batch=' + str(batch) +
+                          'label_GAN_gcn_lstm_pre_train_' + str(FLAGS.pre_epochs) + '_train_' + str(
+        epochs) + '.jpg', dpi=400)
+    fig_pred = sns.heatmap(np.reshape(pred_graph[batch], (90, 90)), ax=ax, cbar_ax=cbar_ax,
+                           cmap='YlGnBu', vmin=0, vmax=1)
+    heatmap_pred = fig_pred.get_figure()
+    heatmap_pred.savefig('./heatmap_new_3/' + 'index=' + str(test_sub) + 'iter=' + str(test_i) + '_batch=' + str(batch) +
+                         'pred_GAN_gcn_lstm_pre_train_' + str(FLAGS.pre_epochs) + '_train_' + str(
+        epochs) + '.jpg', dpi=400)
+    del fig_label
+    del fig_pred
+    del heatmap_label
+    del heatmap_pred
+    gc.collect()
+
+
+# test function
+def test_epoch(test_sess, test_adj_sc, test_adj_fc, test_adj_label, test_features_sc, test_features_fc, test_adj_fc_pre,
+               test_labels_feature, placeholders, model, epoch, index, ax, cbar_ax):
+    test_mse = 0
+    test_feature_mse = 0
+    test_total_pre_loss = 0
+    for i in range(len(test_adj_sc)):
+        # Construct feed dictionary
+        feed_dict = construct_feed_dict(test_adj_sc[i], test_adj_fc[i], test_adj_label[i], test_features_sc[i],
+                                             test_features_fc[i], test_adj_fc_pre[i], test_labels_feature[i],
+                                             placeholders)
+        feed_dict.update({placeholders['dropout']: FLAGS.dropout})
+        # Run single weight update
+        outs = test_sess.run(
+            [model.mse, model.G_sample, model.feature_mse, model.total_Pre_loss, model.precision,
+             model.labels_feature], feed_dict=feed_dict)
+        value_outs = test_sess.run([model.pred_feature_sub, model.label_feature_sub], feed_dict=feed_dict)
+        test_mse = test_mse + outs[0]
+        test_feature_mse = test_feature_mse + outs[2]
+        test_total_pre_loss = test_total_pre_loss + outs[3]
+        label_graph = test_adj_label[i].reshape((FLAGS.batch_size, 8100))
+        pred_graph = outs[1]
+        draw_graph(label_graph, pred_graph, 0, epoch, i, index, ax, cbar_ax)
+    test_mse = test_mse/len(test_adj_sc)
+    test_feature_mse = test_feature_mse/len(test_adj_sc)
+    test_total_pre_loss = test_total_pre_loss/len(test_adj_sc)
+    print("Test cost mse: " + str(test_mse))
+    print("Test cost feature_mse: " + str(test_feature_mse))
+    print("Test cost total_Pre_loss: " + str(test_total_pre_loss))
+    f = open('test_result_pre.txt', 'a')
+    f.write('GAN_gcn_lstm_pre_train_' + str(epoch) + ' Test cost mse: ' + str(test_mse)
+            + ' Test cost feature mse: ' + str(test_feature_mse) + ' Test total cost: ' + str(test_total_pre_loss)
+            + '\n')
+    f.close()
+
+
+def tensor_corrcoef(tensor):
+    X = tensor
+    X_T = tf.transpose(tensor, [0, 2, 1])
+    matrix_x_mut_y = tf.matmul(X, X_T)*FLAGS.window_length
+    matrix_x_sum = tf.reshape(tf.reduce_sum(X, axis=[2]), [FLAGS.batch_size, 90, 1])
+    matrix_x_sum_T = tf.transpose(matrix_x_sum, [0, 2, 1])
+    matrix_x_sum_y = tf.matmul(matrix_x_sum, matrix_x_sum_T)
+    matrix_x_squ_sum = tf.reshape(tf.reduce_sum(tf.square(X), axis=[2]), [FLAGS.batch_size, 90, 1])
+    matrix_x_sum_squ = tf.square(matrix_x_sum)
+    matrix_sqr = tf.sqrt(FLAGS.window_length*matrix_x_squ_sum-matrix_x_sum_squ)
+    matrix_sqr_reshape = tf.reshape(matrix_sqr, [FLAGS.batch_size, 1, 90])
+    corr = (matrix_x_mut_y-matrix_x_sum_y)/(tf.matmul(tf.transpose(matrix_sqr_reshape, [0, 2, 1]), matrix_sqr_reshape))
+    return corr
+

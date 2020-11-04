@@ -4,6 +4,8 @@ import tensorflow as tf
 import tensorflow.contrib.slim as slim
 from keras.layers import Dense
 from numpy import *
+from utils import tensor_corrcoef
+
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
@@ -110,7 +112,6 @@ class Generator(Model):
         # self.reconstructions = InnerProductDecoder(input_dim=FLAGS.hidden1,
         #                                            act=tf.nn.tanh,
         #                                            logging=self.logging)(self.hidden1)
-
         self.hidden2 = GraphConvolutionSparseWindows(input_dim=self.input_dim,
                                                      output_dim=FLAGS.hidden2,
                                                      adj=self.adj_fc,
@@ -225,6 +226,8 @@ class Generator_new(Model):
         self.lstm_fc, _ = InnerProductLSTM(units=self.node_num * FLAGS.hidden3, name='lstm_fc')(self.hidden3)
         self.pred_feature = InnerProduceDense(self.node_num*FLAGS.remove_length, act=tf.nn.sigmoid, name='gen_pred_dense')(self.lstm)
         self.pred_feature = tf.reshape(self.pred_feature, [FLAGS.batch_size, self.node_num, FLAGS.remove_length])
+        self.corr = tensor_corrcoef(tf.concat([tf.reshape(self.inputs_fc[:, -1, :, 1:], [FLAGS.batch_size,
+                                                                                         self.node_num, FLAGS.window_length-1]), self.pred_feature], axis=-1))
         self.lstm = tf.reshape(self.lstm, [FLAGS.batch_size, self.node_num, FLAGS.hidden3])
         self.lstm_fc = tf.reshape(self.lstm_fc, [FLAGS.batch_size, self.node_num, FLAGS.hidden3])
         self.adj_sc = tf.tile(self.adj_sc, [FLAGS.batch_size, 1])
@@ -238,11 +241,86 @@ class Generator_new(Model):
                                                    dropout=self.dropout,
                                                    logging=self.logging,
                                                    name='gen_gcn_h1')(self.lstm_fc)
+        self.hidden1 = tf.reshape(self.hidden1, [FLAGS.batch_size, self.node_num*FLAGS.hidden1])
+        self.reconstructions = InnerProduceDense(self.node_num*self.node_num, tf.nn.sigmoid, name='gen_rec')(self.hidden1)
+        # self.reconstructions = InnerProductDecoderBatch(input_dim=FLAGS.hidden1,
+        #                                                 act=tf.nn.sigmoid,
+        #                                                 logging=self.logging,
+        #                                                 name='gen_decoder')(self.hidden1)
+        self.reconstructions_reshape = tf.reshape(self.reconstructions, [FLAGS.batch_size, self.node_num, self.node_num])
+        self.diag_ones = tf.matrix_set_diag(self.reconstructions_reshape, tf.ones([FLAGS.batch_size, self.node_num]))
+        self.outputs_dense = tf.reshape(self.diag_ones, [FLAGS.batch_size, -1])
+        self.outputs = FLAGS.lamda*self.outputs_dense + (1-FLAGS.lamda)*tf.reshape(self.corr, [FLAGS.batch_size, self.node_num*self
+                                                                                               .node_num])
 
-        self.reconstructions = InnerProductDecoderBatch(input_dim=FLAGS.hidden7,
-                                                        act=tf.nn.sigmoid,
-                                                        logging=self.logging,
-                                                        name='gen_decoder')(self.hidden1)
+
+    def _loss(self):
+        preds_sub = tf.reshape(self.outputs, [FLAGS.batch_size, 90*90])
+        labels_sub = tf.reshape(self.labels, [FLAGS.batch_size, 90*90])
+
+        # Cross entropy error
+        self.loss += tf.reduce_mean(tf.losses.huber_loss(preds_sub, labels_sub))
+
+    def _mse(self):
+        preds_sub = tf.reshape(self.outputs, [FLAGS.batch_size, 90*90])
+        labels_sub = tf.reshape(self.labels, [FLAGS.batch_size, 90*90])
+        self.mse = tf.losses.mean_squared_error(preds_sub, labels_sub)
+
+    def predict(self):
+        return self.outputs, self.pred_feature
+
+class Generator_new_new(Model):
+    def __init__(self, **kwargs):
+        super(Generator_new_new, self).__init__(**kwargs)
+
+    def __call__(self, placeholders, num_features, features_nonzero, num_node, *args, **kwargs):
+        self.inputs_sc = placeholders['sc_features']
+        self.inputs_fc = placeholders['fc_features']
+        self.input_dim = num_features
+        self.node_num = num_node
+        self.features_nonzero = features_nonzero
+        self.adj_sc = placeholders['adj_sc']
+        self.adj_fc = placeholders['adj_fc']
+        self.dropout = placeholders['dropout']
+        self.labels = placeholders['labels']
+        self.labels_feature = placeholders['labels_feature']
+
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)
+
+        self.build()
+        self.loss = 0
+        return self.predict()
+
+    def _build(self):
+        self.adj_sc = tf.tile(self.adj_sc, [FLAGS.batch_size, FLAGS.windows_size, 1])
+        self.adj_sc = tf.reshape(self.adj_sc, [FLAGS.batch_size, FLAGS.windows_size, self.node_num, self.node_num])
+        self.hidden3 = GraphConvolutionSparseWindows(input_dim=self.node_num,
+                                                     output_dim=FLAGS.hidden2,
+                                                     adj=self.adj_sc,
+                                                     features_nonzero=self.features_nonzero,
+                                                     act=tf.nn.relu,
+                                                     dropout=self.dropout,
+                                                     batch_size=FLAGS.batch_size,
+                                                     window_size=FLAGS.windows_size,
+                                                     logging=self.logging,
+                                                     name='gen_gcn_h3')(self.adj_fc)
+        self.hidden2 = GraphConvolutionSparseWindows(input_dim=self.input_dim,
+                                                     output_dim=FLAGS.hidden2,
+                                                     adj=self.adj_fc,
+                                                     features_nonzero=self.features_nonzero,
+                                                     act=tf.nn.relu,
+                                                     dropout=self.dropout,
+                                                     batch_size=FLAGS.batch_size,
+                                                     window_size=FLAGS.windows_size,
+                                                     logging=self.logging,
+                                                     name='gen_gcn_h2')(self.inputs_fc)
+        self.hidden3 = tf.reshape(self.hidden3, [FLAGS.batch_size, FLAGS.windows_size, self.node_num * FLAGS.hidden2])
+        self.hidden2 = tf.reshape(self.hidden2, [FLAGS.batch_size, FLAGS.windows_size, self.node_num*FLAGS.hidden2])
+        self.lstm_fc, _ = InnerProductLSTM(units=self.node_num * FLAGS.hidden3, name='lstm_fc')(self.hidden3)
+        self.pred_feature = InnerProduceDense(self.node_num*FLAGS.remove_length, act=tf.nn.sigmoid, name='gen_pred_dense')(self.lstm_fc)
+        self.pred_feature = tf.reshape(self.pred_feature, [FLAGS.batch_size, self.node_num, FLAGS.remove_length])
+        self.lstm, _ = InnerProductLSTM(units=FLAGS.hidden7, name='gen_lstm')(self.hidden2)
+        self.reconstructions = InnerProduceDense(self.node_num*self.node_num, tf.nn.sigmoid, name='gen_rec')(self.lstm)
         self.reconstructions_reshape = tf.reshape(self.reconstructions, [FLAGS.batch_size, self.node_num, self.node_num])
         self.diag_ones = tf.matrix_set_diag(self.reconstructions_reshape, tf.ones([FLAGS.batch_size, self.node_num]))
         self.outputs = tf.reshape(self.diag_ones, [FLAGS.batch_size, -1])
@@ -262,6 +340,7 @@ class Generator_new(Model):
 
     def predict(self):
         return self.outputs, self.pred_feature
+
 
 class Discriminator_old(Model):
     def __init__(self, **kwargs):

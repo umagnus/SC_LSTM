@@ -1,5 +1,6 @@
 import numpy as np
 import scipy.sparse as sp
+from paramaters import FLAGS
 
 
 def sparse_to_tuple(sparse_mx):
@@ -119,4 +120,60 @@ def mask_test_edges(adj):
 
     # NOTE: these edge lists only contain single direction of edge!
     return adj_train, train_edges, val_edges, val_edges_false, test_edges, test_edges_false
+
+
+def getDataFortrain(index, sc_features, sc_adj, fc_adj, fc_features, fc_adj_pre, node_number):
+    adj_sc, adj_fc, adj_label, features_sc, features_fc, adj_fc_pre, labels_feature = [], [], [], [], [], [], []
+    test_adj_sc, test_adj_fc, test_adj_label, test_features_sc, test_features_fc, test_adj_fc_pre, test_labels_feature = [], [], [], [], [], [], []
+    for sub in index:
+        adj_sc_sub = sc_adj[sub]
+        adj_sc_sub = preprocess_graph(adj_sc_sub)
+        adj_fc_sub = fc_adj[sub]
+        adj_label_sub = fc_adj_pre[sub]
+        features_sc_sub = sc_features[sub]
+        features_fc_sub = fc_features[sub]
+
+        iterations = adj_fc_sub.shape[0]//FLAGS.batch_size - FLAGS.windows_size
+        train_it = []
+        test_it = []
+        for i in range(iterations):
+            if i < int(iterations*0.8):
+                train_it.append(i)
+            else:
+                test_it.append(i)
+        round_data_len = iterations*FLAGS.batch_size
+        adj_fc_data = []
+        features_fc_data = []
+        labels_feature_data = []
+        adj_fc_pre_data = []
+        ydata = []
+        for i in range(round_data_len):
+            adj_fc_data.append(adj_fc_sub[i:i+FLAGS.windows_size])
+            features_fc_data.append(features_fc_sub[i:i+FLAGS.windows_size])
+            labels_feature_data.append(features_fc_sub[i+FLAGS.windows_size])
+            adj_fc_pre_data.append(adj_label_sub[i:i+FLAGS.windows_size])
+            ydata.append(adj_label_sub[i+FLAGS.windows_size])
+        adj_fc_data = np.array(adj_fc_data).reshape([FLAGS.batch_size, iterations*FLAGS.windows_size, node_number, -1])
+        features_fc_data = np.array(features_fc_data).reshape([FLAGS.batch_size, iterations*FLAGS.windows_size, node_number, -1])
+        labels_feature_data = np.array(labels_feature_data).reshape([FLAGS.batch_size, iterations, node_number, -1])
+        adj_fc_pre_data = np.array(adj_fc_pre_data).reshape([FLAGS.batch_size, iterations*FLAGS.windows_size, node_number, -1])
+        ydata = np.array(ydata).reshape([FLAGS.batch_size, iterations, node_number, -1])
+
+        for i in train_it:
+            adj_sc.append(adj_sc_sub)
+            adj_fc.append(adj_fc_data[:, i*FLAGS.windows_size:(i+1)*FLAGS.windows_size])
+            features_sc.append(features_sc_sub)
+            features_fc.append(features_fc_data[:, i*FLAGS.windows_size:(i+1)*FLAGS.windows_size])
+            labels_feature.append(labels_feature_data[:, i][:, :, 0])
+            adj_fc_pre.append(adj_fc_pre_data[:, i * FLAGS.windows_size:(i + 1) * FLAGS.windows_size])
+            adj_label.append(ydata[:, i])
+        for i in test_it:
+            test_adj_sc.append(adj_sc_sub)
+            test_adj_fc.append(adj_fc_data[:, i*FLAGS.windows_size:(i+1)*FLAGS.windows_size])
+            test_features_sc.append(features_sc_sub)
+            test_features_fc.append(features_fc_data[:, i*FLAGS.windows_size:(i+1)*FLAGS.windows_size])
+            test_labels_feature.append(labels_feature_data[:, i][:, :, 0])
+            test_adj_fc_pre.append(adj_fc_pre_data[:, i * FLAGS.windows_size:(i + 1) * FLAGS.windows_size])
+            test_adj_label.append(ydata[:, i])
+    return adj_sc, adj_fc, adj_label, features_sc, features_fc, adj_fc_pre, labels_feature, test_adj_sc, test_adj_fc, test_adj_label, test_features_sc, test_features_fc, test_adj_fc_pre, test_labels_feature
 

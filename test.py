@@ -13,47 +13,34 @@ import copy
 import scipy.sparse as sp
 import seaborn as sns
 import matplotlib.pyplot as plt
+import gc
+import random
 
 from sklearn.metrics import roc_auc_score
 from sklearn.metrics import average_precision_score
 
 from optimizer import OptimizerED
 from input_data import loadFSData
-from models import Generator, Discriminator, lstmGAN
-from preprocessing import preprocess_graph, construct_feed_dict, construct_feed_dict_discriminator, sparse_to_tuple, mask_test_edges
+from models import Generator, Discriminator, lstmGAN, Generator_new
+from preprocessing import preprocess_graph, construct_feed_dict, construct_feed_dict_discriminator, sparse_to_tuple, mask_test_edges, getDataFortrain
+from paramaters import FLAGS
+from matplotlib.pyplot import savefig
+from utils import test_epoch
 
-# Settings
-flags = tf.app.flags
-FLAGS = flags.FLAGS
-flags.DEFINE_float('pre_learning_rate', 0.0001, 'Initial pre learning rate')
-flags.DEFINE_float('learning_rate', 0.0001, 'Initial learning rate.')
-flags.DEFINE_integer('pre_epochs', 100, 'Number of epochs to pre-train')
-flags.DEFINE_integer('epochs', 100, 'Number of epochs to train.')
-flags.DEFINE_integer('hidden1', 128, 'Number of units in hidden layer 1.(sc)')
-flags.DEFINE_integer('hidden2', 16, 'Number of units in hidden layer 2.(fc)')
-flags.DEFINE_integer('hidden3', 32, 'Number of units in hidden layer 3.(lstm)')
-flags.DEFINE_integer('hidden4', 8, 'Number of units in hidden layer 4.(dis)')
-flags.DEFINE_integer('hidden5', 128, 'Number of units in hidden layer 5.(dis_fc)')
-flags.DEFINE_integer('hidden6', 16, 'Number of units in hidden layer 6.(dis_fc)')
-flags.DEFINE_float('weight_decay', 0., 'Weight for L2 loss on embedding matrix.')
-flags.DEFINE_float('dropout', 0., 'Dropout rate (1 - keep probability).')
-flags.DEFINE_integer('windows_size', 8, 'Length of windows')
-flags.DEFINE_integer('batch_size', 16, 'Batch size')
+np.set_printoptions(suppress=True)
+model_str = FLAGS.model
+dataset_str = FLAGS.dataset
 
 # Load data
-sc_features, sc_adj, fc_adj, fc_features = loadFSData("H:\Data\dMRI", "H:\Data\REST1")
+sc_features, sc_adj, fc_adj, fc_features = loadFSData("G:\Data\SC_LSTM test\dMRI", "G:\Data\SC_LSTM test\REST1")
 fc_adj_pre = copy.deepcopy(fc_adj)
 for i in range(len(fc_adj)):
     for j in range(len(fc_adj[i])):
         fc_adj[i][j] = preprocess_graph(fc_adj[i][j])
 # fc_adj = fc_adj_pre
-train_index = []
-test_index = []
+index = []
 for i in range(len(sc_adj)):
-    if i <= int(len(sc_adj)*0.8):
-        train_index.append(i)
-    else:
-        test_index.append(i)
+    index.append(i)
 
 # Define placeholders
 placeholders = {
@@ -62,18 +49,28 @@ placeholders = {
     'adj_fc': tf.placeholder(tf.float32),
     'adj_sc': tf.placeholder(tf.float32),
     'labels': tf.placeholder(tf.float32),
-    'dropout': tf.placeholder_with_default(0., shape=())
+    'dropout': tf.placeholder_with_default(0., shape=()),
+    'adj_fc_pre': tf.placeholder(tf.float32),
+    'labels_feature': tf.placeholder(tf.float32)
 }
 
 time_length = 1200
-window_length = 40
+window_length = FLAGS.window_length
 node_number = 90
 remove_length = 1
 window_number = time_length - window_length
 num_features = 90
 features_nonzero = 890
+
+# figure ax
+fig0 = plt.figure(figsize=(6, 4))
+ax = fig0.add_axes([0.2, 0.07, 0.6, 0.9], facecolor='white')
+cbar_ax = fig0.add_axes([0.85, 0.07, 0.05, 0.88])
+
+
+
 # Create model
-generator = Generator()
+generator = Generator_new()
 discriminator = Discriminator()
 lstmGAN = lstmGAN(placeholders, window_length, features_nonzero, node_number, generator, discriminator)
 
@@ -83,69 +80,51 @@ norm = sc_adj[0].shape[0] * sc_adj[0].shape[0] / float((sc_adj[0].shape[0] * sc_
 # Initialize session
 sess = tf.Session()
 sess.run(tf.global_variables_initializer())
-saver_path = 'model/'
-# new_saver = tf.train.import_meta_graph(saver_path + 'pre_train_' + str(FLAGS.pre_epochs) + '_train_' + str(FLAGS.epochs)
-#                                        + '.cpkt-' + str(FLAGS.epochs) + '.meta')
-# new_saver.restore(sess, saver_path + 'pre_train_' + str(FLAGS.pre_epochs) + '_train_' + str(FLAGS.epochs) + '.cpkt-' +
-#                   str(FLAGS.epochs))
-new_saver = tf.train.import_meta_graph(saver_path + 'pre_train_' + str(FLAGS.pre_epochs) + '.cpkt.meta')
-new_saver.restore(sess, saver_path + 'pre_train_' + str(FLAGS.pre_epochs) + '.cpkt')
+saver = tf.train.Saver(max_to_keep=100)
+pre_epoch = 0
+# saver.restore(sess, 'model/pre_10-10')
 
+for ind in index:
+    sub_index=[]
+    sub_index.append(ind)
+    adj_sc, adj_fc, adj_label, features_sc, features_fc, adj_fc_pre, labels_feature, test_adj_sc, test_adj_fc, \
+    test_adj_label, test_features_sc, test_features_fc, test_adj_fc_pre, test_labels_feature = \
+        getDataFortrain(sub_index, sc_features, sc_adj, fc_adj, fc_features, fc_adj_pre, node_number)
+    print("index=%r:" % ind)
+    for epoch in range(FLAGS.sub_epochs):
+        avg_pre_loss = 0
+        avg_pre_acc = 0
+        avg_pre_rec = 0
+        avg_pre_pre = 0
+        t = time.time()
+        for i in range(len(adj_sc)):
+            # Construct feed dictionary
+            feed_dict = construct_feed_dict(adj_sc[i], adj_fc[i], adj_label[i], features_sc[i], features_fc[i],
+                                            adj_fc_pre[i], labels_feature[i], placeholders)
+            feed_dict.update({placeholders['dropout']: FLAGS.dropout})
 
-test_cost = 0
-# test_accuracy = 0
-hm_graph = np.zeros(8100)
-for sub in test_index:
-    adj_sc_sub = sc_adj[sub]
-    adj_sc_sub = preprocess_graph(adj_sc_sub)
-    adj_fc_sub = fc_adj[sub]
-    adj_label_sub = fc_adj_pre[sub]
-    # for ind in range(adj_fc_sub.shape[0]):
-    #     adj_fc_sub[ind] = preprocess_graph(adj_fc_sub[ind])
-    features_sc_sub = sc_features[sub]
-    features_fc_sub = fc_features[sub]
-
-    iterations = adj_fc_sub.shape[0] // (FLAGS.batch_size * FLAGS.windows_size)-1
-    round_data_len = iterations * FLAGS.batch_size * FLAGS.windows_size
-    adj_fc_data = adj_fc_sub[:round_data_len].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number,
-                                                      -1)
-    features_fc_data = features_fc_sub[:round_data_len].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size,
-                                                                node_number, -1)
-    ydata = adj_label_sub[FLAGS.windows_size:round_data_len + FLAGS.windows_size].reshape(FLAGS.batch_size, iterations * FLAGS.windows_size, node_number, -1)
-    test_cost_iter = 0
-    # test_accuracy_iter = 0
-    hm_graph_iter = np.zeros(8100)
-    for i in range(iterations):
-        adj_sc = adj_sc_sub
-        adj_fc = adj_fc_data[:, i * FLAGS.windows_size:(i + 1) * FLAGS.windows_size]
-        features_sc = features_sc_sub
-        features_fc = features_fc_data[:, i * FLAGS.windows_size:(i + 1) * FLAGS.windows_size]
-        adj_label = ydata[:, i * FLAGS.windows_size:(i + 1) * FLAGS.windows_size]
-
-        # Construct feed dictionary
-        feed_dict = construct_feed_dict(adj_sc, adj_fc, adj_label[:, 0], features_sc, features_fc, placeholders)
-        # Run single weight update
-        outs = sess.run([lstmGAN.mse, lstmGAN.G_sample], feed_dict=feed_dict)
-
-        # Compute average loss
-        test_cost_iter = test_cost_iter + outs[0]
-        # test_accuracy_iter = test_accuracy_iter + outs[1]
-        # print(adj_label[:, 0].reshape((FLAGS.batch_size, 8100)))
-        # print(outs[1])
-        # print("++++++++++++++++++++++++")
-        hm_graph_iter = hm_graph_iter+np.sum(abs(adj_label[:, 0].reshape((FLAGS.batch_size, 8100))-outs[1]), axis=0)/FLAGS.batch_size
-        # heatmap = sns.heatmap(abs(adj_label[:, 0].reshape((FLAGS.batch_size, 8100))-outs[1]), cmap='YlGnBu')
-        # plt.show()
-
-    test_cost = test_cost+test_cost_iter/iterations
-    # test_accuracy = test_accuracy + test_accuracy_iter/iterations
-    hm_graph = hm_graph + hm_graph_iter/iterations
-
-print("Test cost mse: " + str(test_cost/len(test_index)))
-# print("Test accuracy: " + str(test_accuracy/len(test_index)))
-hm_graph = hm_graph/len(test_index)
-heatmap = sns.heatmap(np.reshape(hm_graph, (90, 90)), cmap='YlGnBu', vmin=0, vmax=0.5)
-plt.show()
-# roc_score, ap_score = get_roc_score(test_edges, test_edges_false)
-# print('Test ROC score: ' + str(roc_score))
-# print('Test AP score: ' + str(ap_score))
+            # Run single weight update
+            outs_feature = sess.run([lstmGAN.Pre_feature_solver], feed_dict=feed_dict)
+            outs = sess.run(
+                [lstmGAN.Pre_solver, lstmGAN.Pre_loss, lstmGAN.feature_mse, lstmGAN.total_Pre_loss, lstmGAN.precision,
+                 lstmGAN.pred_feature_sub, lstmGAN.label_feature_sub], feed_dict=feed_dict)
+            # Compute average loss
+            avg_pre_loss = avg_pre_loss + outs[1]
+            avg_pre_acc = avg_pre_acc + outs[2]
+            avg_pre_rec = avg_pre_rec + outs[3]
+            avg_pre_pre = avg_pre_pre + outs[4]
+        sess.run([lstmGAN.add_global])
+        avg_pre_loss = avg_pre_loss / len(adj_sc)
+        avg_pre_acc = avg_pre_acc / len(adj_sc)
+        avg_pre_rec = avg_pre_rec / len(adj_sc)
+        avg_pre_pre = avg_pre_pre / len(adj_sc)
+        print("PreSubEpoch:", '%04d' % (epoch + 1), "pre_train_loss=", "{:.5f}".format(avg_pre_loss),
+              "pre_train_feature_mse=", "{:.5f}".format(avg_pre_acc),
+              "pre_train_total_Pre_loss=", "{:.5f}".format(avg_pre_rec),
+              "pre_train_precision=", "{:.5f}".format(avg_pre_pre),
+              "time=", "{:.5f}".format(time.time() - t))
+        if epoch % 10 == 0:
+            saver.save(sess, 'model/dense_pre_%r_index=%r' % (pre_epoch, ind), global_step=epoch)
+    print("sub_pre_train_index=%r" % ind + "finished!")
+    test_epoch(sess, test_adj_sc, test_adj_fc, test_adj_label, test_features_sc, test_features_fc, test_adj_fc_pre,
+               test_labels_feature, placeholders, lstmGAN, pre_epoch, ind, ax, cbar_ax)
