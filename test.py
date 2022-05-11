@@ -21,7 +21,7 @@ from sklearn.metrics import average_precision_score
 
 from optimizer import OptimizerED
 from input_data import loadFSData
-from models import Generator, Discriminator, lstmGAN, Generator_new
+from models import Generator, Discriminator, Generator_new, lstmGAN, Generator_tgcn_fc, node_LSTM, Generator_fnn
 from preprocessing import preprocess_graph, construct_feed_dict, construct_feed_dict_discriminator, sparse_to_tuple, mask_test_edges, getDataFortrain
 from paramaters import FLAGS
 from matplotlib.pyplot import savefig
@@ -32,7 +32,7 @@ model_str = FLAGS.model
 dataset_str = FLAGS.dataset
 
 # Load data
-sc_features, sc_adj, fc_adj, fc_features = loadFSData("G:\Data\SC_LSTM test\dMRI", "G:\Data\SC_LSTM test\REST1")
+sc_features, sc_adj, fc_adj, fc_features = loadFSData("G:\Data\dMRI_preprocess\dMRI", "G:\Data\REST1")
 fc_adj_pre = copy.deepcopy(fc_adj)
 for i in range(len(fc_adj)):
     for j in range(len(fc_adj[i])):
@@ -70,20 +70,25 @@ cbar_ax = fig0.add_axes([0.85, 0.07, 0.05, 0.88])
 
 
 # Create model
-generator = Generator_new()
+generator = Generator_tgcn_fc()
 discriminator = Discriminator()
 lstmGAN = lstmGAN(placeholders, window_length, features_nonzero, node_number, generator, discriminator)
+# lstmGAN = node_LSTM(placeholders, window_length, features_nonzero, node_number)
 
 pos_weight = float(sc_adj[0].shape[0] * sc_adj[0].shape[0] - sc_adj[0].sum()) / sc_adj[0].sum()
 norm = sc_adj[0].shape[0] * sc_adj[0].shape[0] / float((sc_adj[0].shape[0] * sc_adj[0].shape[0] - sc_adj[0].sum()) * 2)
 
 # Initialize session
 sess = tf.Session()
-sess.run(tf.global_variables_initializer())
+# sess.run(tf.global_variables_initializer())
 saver = tf.train.Saver(max_to_keep=100)
 pre_epoch = 0
-# saver.restore(sess, 'model/pre_10-10')
+saver.restore(sess, 'model/tgcn_fc_dense_SC_pre_much_50_lamda_1.0_gama_1.0-50')
 
+mse = 0
+feature_mse = 0
+mae = 0
+feature_mae = 0
 for ind in index:
     sub_index=[]
     sub_index.append(ind)
@@ -106,7 +111,7 @@ for ind in index:
             # Run single weight update
             outs_feature = sess.run([lstmGAN.Pre_feature_solver], feed_dict=feed_dict)
             outs = sess.run(
-                [lstmGAN.Pre_solver, lstmGAN.Pre_loss, lstmGAN.feature_mse, lstmGAN.total_Pre_loss, lstmGAN.precision,
+                [lstmGAN.Pre_solver, lstmGAN.mse, lstmGAN.feature_mse, lstmGAN.total_Pre_loss, lstmGAN.precision,
                  lstmGAN.pred_feature_sub, lstmGAN.label_feature_sub], feed_dict=feed_dict)
             # Compute average loss
             avg_pre_loss = avg_pre_loss + outs[1]
@@ -126,5 +131,10 @@ for ind in index:
         if epoch % 10 == 0:
             saver.save(sess, 'model/dense_pre_%r_index=%r' % (pre_epoch, ind), global_step=epoch)
     print("sub_pre_train_index=%r" % ind + "finished!")
-    test_epoch(sess, test_adj_sc, test_adj_fc, test_adj_label, test_features_sc, test_features_fc, test_adj_fc_pre,
+    test_mse, test_feature_mse, test_mae, test_feature_mae = test_epoch(sess, test_adj_sc, test_adj_fc, test_adj_label, test_features_sc, test_features_fc, test_adj_fc_pre,
                test_labels_feature, placeholders, lstmGAN, pre_epoch, ind, ax, cbar_ax)
+    mse = mse+test_mse
+    feature_mse = feature_mse + test_feature_mse
+    mae = mae + test_mae
+    feature_mae = feature_mae + test_feature_mae
+print(mse, feature_mse, mae, feature_mae)

@@ -131,9 +131,9 @@ class InnerProductDecoderBatch(Layer):
 
     def _call(self, inputs):
         inputs = tf.nn.dropout(inputs, 1-self.dropout)
-        x = tf.transpose(inputs, (0, 2, 1))
+        x = tf.transpose(inputs, (0, 1, 3, 2))
         x = tf.matmul(inputs, x)
-        x = tf.reshape(x, [FLAGS.batch_size, -1])
+        x = tf.reshape(x, [FLAGS.batch_size, FLAGS.pred_size, -1])
         x = tf.nn.relu(x)
         outputs = self.act(x)
         return outputs
@@ -158,6 +158,29 @@ class GraphConvolutionSparseWindows(Layer):
         x = tf.matmul(self.adj, x)
         outputs = self.act(x)
         return outputs
+
+class GraphConvolutionSparseWindowsReuse(Layer):
+    """Graph convolution layer for sparse inputs."""
+    def __init__(self, input_dim, output_dim, adj1, adj2, features_nonzero, batch_size, window_size, dropout=0., act=tf.nn.relu, **kwargs):
+        super(GraphConvolutionSparseWindowsReuse, self).__init__(**kwargs)
+        with tf.variable_scope(self.name + '_vars/', reuse=True):
+            self.vars['weights'] = weight_variable_glorot_windows(batch_size, window_size, input_dim, output_dim, name="gcsw_weights")
+        self.dropout = dropout
+        self.adj1 = adj1
+        self.adj2 = adj2
+        self.act = act
+        self.issparse = True
+        self.features_nonzero = features_nonzero
+
+    def _call(self, inputs):
+        x = inputs
+        #x = dropout_sparse(x, 1-self.dropout, self.features_nonzero)
+        x = tf.matmul(x, self.vars['weights'])
+        x_1 = tf.matmul(self.adj1, x)
+        x_2 = tf.matmul(self.adj2, x)
+        outputs_1 = self.act(x_1)
+        outputs_2 = self.act(x_2)
+        return outputs_1, outputs_2
 
 
 class GraphConvolutionSparseBatch(Layer):
@@ -200,6 +223,25 @@ class InnerProductLSTM(Layer):
             return outputs, c_outputs
 
 
+class InnerProductGRU(Layer):
+    def __init__(self, units, dropout=0., act=tf.nn.tanh,  **kwargs):
+        super(InnerProductGRU, self).__init__(**kwargs)
+        self.dropout = dropout
+        self.act = act
+        self.units = units
+
+    def _call(self, inputs):
+        with tf.variable_scope(self.name, default_name='lstm') as scope:
+            cell = tf.nn.rnn_cell.GRUCell(num_units=self.units, activation=self.act)
+            self.current_V, h = tf.nn.dynamic_rnn(cell=cell,
+                                                       inputs=inputs,
+                                                       dtype=tf.float32,
+                                                       time_major=False)
+            outputs = tf.reshape(h, [-1, self.units])
+            c_outputs = tf.reshape(h, [-1, self.units])
+            return outputs, c_outputs
+
+
 class InnerProduceDense(Layer):
     def __init__(self, units, dropout=0., act=tf.nn.sigmoid, **kwargs):
         super(InnerProduceDense, self).__init__(**kwargs)
@@ -212,3 +254,15 @@ class InnerProduceDense(Layer):
             output = slim.fully_connected(inputs, self.units, self.act)
             return output
 
+
+# class Attention(Layer):
+#     def __init__(self, inputs_c, inputs_f, units, **kwargs):
+#         super(Attention, self).__init__(**kwargs)
+#         self.inputs_c = inputs_c
+#         self.inputs_f = inputs_f
+#         self.units = units
+#         with tf.variable_scope(self.name + '_vars'):
+#             self.vars['q'] = weight_variable_glorot_batch(batch_size, input_dim, output_dim, name="gcsb_weights")
+#
+#     def __call__(self, inputs):
+#         with tf.variable_scope(self.name, default_name='att', reuse=tf.AUTO_REUSE) as scope:

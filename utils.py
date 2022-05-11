@@ -174,19 +174,19 @@ def chebyshev_polynomials(adj, k):
     return sparse_to_tuple(t_k)
 
 
-def draw_graph(label_graph, pred_graph, batch, epochs, test_i, test_sub, ax, cbar_ax):
+def draw_graph(label_graph, pred_graph, batch, epochs, test_i, time, test_sub, ax, cbar_ax):
     fig_label = sns.heatmap(np.reshape(label_graph[batch], (90, 90)), ax=ax, cbar_ax=cbar_ax,
                             cmap='YlGnBu', vmin=0, vmax=1)
     heatmap_label = fig_label.get_figure()
-    heatmap_label.savefig('./heatmap_new_3/' + 'index=' + str(test_sub) + 'iter=' + str(test_i) + '_batch=' + str(batch) +
-                          'label_GAN_gcn_lstm_pre_train_' + str(FLAGS.pre_epochs) + '_train_' + str(
-        epochs) + '.jpg', dpi=400)
+    heatmap_label.savefig('./heatmap_new_4/' + 'index=' + str(test_sub) + 'iter=' + str(test_i) + '_batch=' + str(batch)
+                          + 'time=' + str(time) + 'label_tgcn_fc_train_' + str(FLAGS.pre_epochs) + '_train_' +
+                          str(epochs) + '.jpg', dpi=400)
     fig_pred = sns.heatmap(np.reshape(pred_graph[batch], (90, 90)), ax=ax, cbar_ax=cbar_ax,
                            cmap='YlGnBu', vmin=0, vmax=1)
     heatmap_pred = fig_pred.get_figure()
-    heatmap_pred.savefig('./heatmap_new_3/' + 'index=' + str(test_sub) + 'iter=' + str(test_i) + '_batch=' + str(batch) +
-                         'pred_GAN_gcn_lstm_pre_train_' + str(FLAGS.pre_epochs) + '_train_' + str(
-        epochs) + '.jpg', dpi=400)
+    heatmap_pred.savefig('./heatmap_new_4/' + 'index=' + str(test_sub) + 'iter=' + str(test_i) + '_batch=' + str(batch)
+                         + 'time=' + str(time) + 'pred_tgcn_train_' + str(FLAGS.pre_epochs) + '_train_' +
+                         str(epochs) + '.jpg', dpi=400)
     del fig_label
     del fig_pred
     del heatmap_label
@@ -199,7 +199,8 @@ def test_epoch(test_sess, test_adj_sc, test_adj_fc, test_adj_label, test_feature
                test_labels_feature, placeholders, model, epoch, index, ax, cbar_ax):
     test_mse = 0
     test_feature_mse = 0
-    test_total_pre_loss = 0
+    test_mae = 0
+    test_feature_mae = 0
     for i in range(len(test_adj_sc)):
         # Construct feed dictionary
         feed_dict = construct_feed_dict(test_adj_sc[i], test_adj_fc[i], test_adj_label[i], test_features_sc[i],
@@ -208,26 +209,40 @@ def test_epoch(test_sess, test_adj_sc, test_adj_fc, test_adj_label, test_feature
         feed_dict.update({placeholders['dropout']: FLAGS.dropout})
         # Run single weight update
         outs = test_sess.run(
-            [model.mse, model.G_sample, model.feature_mse, model.total_Pre_loss, model.precision,
-             model.labels_feature], feed_dict=feed_dict)
-        value_outs = test_sess.run([model.pred_feature_sub, model.label_feature_sub], feed_dict=feed_dict)
+            [model.mse, model.G_sample, model.feature_mse, model.mae, model.feature_mae], feed_dict=feed_dict)
+        # value_outs = test_sess.run([model.pred_feature_sub, model.label_feature_sub], feed_dict=feed_dict)
         test_mse = test_mse + outs[0]
         test_feature_mse = test_feature_mse + outs[2]
-        test_total_pre_loss = test_total_pre_loss + outs[3]
-        label_graph = test_adj_label[i].reshape((FLAGS.batch_size, 8100))
-        pred_graph = outs[1]
-        draw_graph(label_graph, pred_graph, 0, epoch, i, index, ax, cbar_ax)
+        test_mae = test_mae + outs[3]
+        test_feature_mae = test_feature_mae + outs[4]
+        # out = test_sess.run([model.inputs_fc, model.labels, model.labels_feature], feed_dict=feed_dict)
+        # features_corr = np.concatenate([np.reshape(out[0][:, -1, :, 1:], [FLAGS.batch_size, 90, FLAGS.window_length - 1]),
+        #                                 out[2]], axis=-1)
+        # print(np.corrcoef(features_corr[0, :, 40:FLAGS.window_length+40]))
+        # print(out[0][:, FLAGS.pred_size-1])
+        # print("-------------")
+        # print(np.reshape(out[1], [FLAGS.batch_size, FLAGS.pred_size, 90, 90])[:, FLAGS.pred_size-1])
+        # print("+++++++++++++")
+        if index == 3:
+            label_graph = test_adj_label[i][:, 39].reshape((FLAGS.batch_size, 8100))
+            pred_graph = outs[1][:, 39]
+            draw_graph(label_graph, pred_graph, 0, epoch, i, 39, index, ax, cbar_ax)
+        # label_graph = test_adj_label[i][:, FLAGS.pred_size-1].reshape((FLAGS.batch_size, 8100))
+        # pred_graph = outs[1][:, FLAGS.pred_size-1]
+        # draw_graph(label_graph, pred_graph, 0, epoch, i, FLAGS.pred_size-1, index, ax, cbar_ax)
     test_mse = test_mse/len(test_adj_sc)
     test_feature_mse = test_feature_mse/len(test_adj_sc)
-    test_total_pre_loss = test_total_pre_loss/len(test_adj_sc)
-    print("Test cost mse: " + str(test_mse))
-    print("Test cost feature_mse: " + str(test_feature_mse))
-    print("Test cost total_Pre_loss: " + str(test_total_pre_loss))
-    f = open('test_result_pre.txt', 'a')
-    f.write('GAN_gcn_lstm_pre_train_' + str(epoch) + ' Test cost mse: ' + str(test_mse)
-            + ' Test cost feature mse: ' + str(test_feature_mse) + ' Test total cost: ' + str(test_total_pre_loss)
-            + '\n')
-    f.close()
+    test_mae = test_mae/len(test_adj_sc)
+    test_feature_mae = test_feature_mae/len(test_adj_sc)
+    return test_mse, test_feature_mse, test_mae, test_feature_mae
+    # print("Test cost mse: " + str(test_mse))
+    # print("Test cost feature_mse: " + str(test_feature_mse))
+    # print("Test cost total_Pre_loss: " + str(test_total_pre_loss))
+    # f = open('test_result_pre.txt', 'a')
+    # f.write('GAN_gcn_lstm_pre_train_' + str(epoch) + ' Test cost mse: ' + str(test_mse)
+    #         + ' Test cost feature mse: ' + str(test_feature_mse) + ' Test total cost: ' + str(test_total_pre_loss)
+    #         + '\n')
+    # f.close()
 
 
 def tensor_corrcoef(tensor):
@@ -244,3 +259,17 @@ def tensor_corrcoef(tensor):
     corr = (matrix_x_mut_y-matrix_x_sum_y)/(tf.matmul(tf.transpose(matrix_sqr_reshape, [0, 2, 1]), matrix_sqr_reshape))
     return corr
 
+
+def t_tensor_corrcoef(tensor, pred_step):
+    tmp_tensor = tensor[:, :, :FLAGS.window_length]
+    t_corr = tensor_corrcoef(tmp_tensor)
+    t_corr = tf.reshape(t_corr, [FLAGS.batch_size, 1, 90, 90])
+    for i in range(pred_step-1):
+        tmp_tensor = tensor[:, :, i+1:FLAGS.window_length+i+1]
+        t_corr = tf.concat([t_corr, tf.reshape(tensor_corrcoef(tmp_tensor), [FLAGS.batch_size, 1, 90, 90])], axis=1)
+    return t_corr
+
+def hsic(x, y, n):
+    Kxy = tf.multiply(x, y)
+    h = tf.trace(Kxy) / n**2 + tf.reduce_mean(x, axis=[2, 3]) * tf.reduce_mean(y, axis=[2, 3]) - 2*tf.reduce_mean(Kxy, axis=[2, 3]) / n
+    return tf.reduce_mean(h * n**2 / (n-1)**2)

@@ -64,13 +64,13 @@ def MatToList(edge_weight):
             k = k+1
     return edge_weight_list
 
-
 def loadFSData(SC_path, FC_path):
     SC_list = os.listdir(SC_path)
     FC_list = os.listdir(FC_path)
     SC_list.sort()
     FC_list.sort()
-    SC_dir = "T1w\Diffusion\\network_DTI.mat"
+    # SC_dir = "T1w\Diffusion\\network_DTI.mat"
+    SC_dir = "DTI_connectivity_voxel_norm.mat"
     FC_dir = "aal_RS_Regressed.mat"
     feature = []
     adj = []
@@ -81,8 +81,9 @@ def loadFSData(SC_path, FC_path):
         subj_dir = os.path.join(SC_path, SCfiles, SC_dir)
         subj_data = io.loadmat(subj_dir)
         print("reading data " + subj_dir)
-        subj_mat_sc_all = subj_data['network_DTI']
-        subj_mat_sc = subj_mat_sc_all[0, 0]['CD'][0, 0]['matrix']
+        # subj_mat_sc_all = subj_data['network_DTI']
+        # subj_mat_sc = subj_mat_sc_all[0, 0]['CD'][0, 0]['matrix']
+        subj_mat_sc = subj_data['connectivity']
         feature.append(np.identity(90).tolist())
         adj.append(subj_mat_sc)
     time_length = 1200
@@ -97,13 +98,23 @@ def loadFSData(SC_path, FC_path):
         subj_mat_fc = subj_data['RS_Regressed']
         subj_mat_fc_list = subj_mat_fc.reshape((-1))
         subj_mat_fc_new = (subj_mat_fc-min(subj_mat_fc_list))/(max(subj_mat_fc_list)-min(subj_mat_fc_list))
+
+        # ind=[]
+        # for indx in range(len(subj_mat_fc_new[0])):
+            # ind.append(indx)
+        # plt.plot(ind, subj_mat_fc_new[0], color='red', lw=2.5)
+        # plt.plot(ind, subj_mat_fc_new[1], color='blue', lw=2.5)
+        # plt.plot(ind, subj_mat_fc_new[2], color='green', lw=2.5)
+        # plt.plot(ind, subj_mat_fc_new[3], color='brown', lw=2.5)
+        # plt.plot(ind, subj_mat_fc_new[4], color='darkblue', lw=2.5)
+        # plt.show()
         # subj_mat_fc_new = preprocessing.scale(subj_mat_fc)
         i_Features = np.arange(window_number*node_number*window_length).reshape((window_number, node_number, window_length)).astype('float32')
         i_adj = np.arange(window_number*node_number*node_number).reshape((window_number, node_number, node_number)).astype('float32')
         for w in range(0, window_number, FLAGS.remove_length):
             w_start = w
             w_end = w_start + window_length
-            w_series = np.transpose(subj_mat_fc[w_start:w_end, :])
+            w_series = np.transpose(subj_mat_fc_new[w_start:w_end, :])
             w_edgeWeight = np.corrcoef(w_series)
             #edgeWeight_list = MatToList(w_edgeWeight)
             edgeWeight_list = w_edgeWeight.reshape((-1))
