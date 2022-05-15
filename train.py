@@ -21,7 +21,7 @@ from sklearn.metrics import average_precision_score
 
 from optimizer import OptimizerED
 from input_data import loadFSData
-from models import Discriminator, lstmGAN, Generator_new, Generator_tgcn_sc, Generator_fnn, Generator_HA
+from models import Discriminator, lstmGAN, Generator_TCGN, Generator_tgcn_sc, Generator_fnn, Generator_HA
 from preprocessing import preprocess_graph, construct_feed_dict, construct_feed_dict_discriminator, sparse_to_tuple, mask_test_edges, getDataFortrain
 from paramaters import FLAGS
 from matplotlib.pyplot import savefig
@@ -226,7 +226,7 @@ def test_epoch(test_sess, epochs):
 adj_sc, adj_fc, adj_label, features_sc, features_fc, adj_fc_pre, labels_feature, test_adj_sc, test_adj_fc, test_adj_label, test_features_sc, test_features_fc, test_adj_fc_pre, test_labels_feature = getDataFortrain(index, sc_features, sc_adj, fc_adj, fc_features, fc_adj_pre, node_number)
 
 # Create model
-generator = Generator_HA()
+generator = Generator_TCGN()
 discriminator = Discriminator()
 lstmGAN = lstmGAN(placeholders, window_length, features_nonzero, node_number, generator, discriminator)
 

@@ -405,9 +405,9 @@ class Generator(Model):
 #     def predict(self):
 #         return self.outputs, self.pred_feature
 
-class Generator_new(Model):
+class Generator_TCGN(Model):
     def __init__(self, **kwargs):
-        super(Generator_new, self).__init__(**kwargs)
+        super(Generator_TCGN, self).__init__(**kwargs)
 
     def __call__(self, placeholders, num_features, features_nonzero, num_node, *args, **kwargs):
         self.inputs_sc = placeholders['sc_features']
